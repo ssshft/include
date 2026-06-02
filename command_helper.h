@@ -104,7 +104,7 @@ namespace om {
             strncpy(tcmd.body.queryOrder.strategyId, strategyId, STRATEGYID_SIZE);
             strncpy(tcmd.body.queryOrder.instId, instId, INSTID_SIZE);
             tcmd.body.queryOrder.clientOrderId = clientOrderId;
-            trncpy(tcmd.body.queryOrder.orderId, orderId, ORDER_SIZE);
+            strncpy(tcmd.body.queryOrder.orderId, orderId, ORDER_SIZE);
 
             LOG_DEBUG("{}", tcmd.getString());
             utrade2TbTCommandShm->push(tcmd);
@@ -135,7 +135,7 @@ namespace om {
             utrade2TbTCommandShm->push(tcmd);
         }
 
-        void query_balance(ExchangeType exchangeType, InstType instType, const char* strategyId, const char* currency) {
+        void query_balance(ExchangeType exchangeTypeEnum, InstType instTypeEnum, const char* strategyId, const char* currency) {
             pubsub::TCommand tcmd;
             memset(&tcmd, 0, sizeof(pubsub::TCommand));
             tcmd.cmdTypeEnum = pubsub::CMD_QUERY_BALANCE;

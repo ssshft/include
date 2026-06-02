@@ -943,6 +943,7 @@ struct AccountCfg {
 	std::string apiKey{""};
 	std::string secretKey{""};
     std::string password{""};
+    std::string userId{""};
     bool isSimulated{false};
 	std::string restUrl{""};
 	std::string wsUrl{""};

@@ -133,8 +133,8 @@ namespace sm{
 
         void instrumentInfo_maintainance() {
             while (1) {
-                cache_all();
                 std::this_thread::sleep_for(std::chrono::minutes(5));
+                cache_all();
             }
         }
 

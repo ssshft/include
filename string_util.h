@@ -15,6 +15,7 @@
 #include "base64.hpp"
 #include "data_struct.h"
 #include <fmt/format.h>
+#include <charconv>
 
 
 #define DOUBLE_EPSLION 0.00000001
@@ -136,20 +137,6 @@ namespace crypto{
         return ss.str();
     }
 
-    inline std::string getBinanceSignatureRest(const std::string &key, const std::string &data) {
-        unsigned char hash[EVP_MAX_MD_SIZE];
-        unsigned int length;
-        HMAC(EVP_sha256(), key.c_str(), key.length(), reinterpret_cast<const unsigned char*>(data.c_str()), data.length(), hash, &length);
-        std::stringstream ss;
-        ss << std::hex << std::setfill('0');
-        for (unsigned int i = 0; i < length; i++) {
-            ss << std::setw(2) << static_cast<int>(hash[i]);
-        }
-        
-        return ss.str();
-    }
-
-
     inline std::string encryptWithHMACForHtx(const std::string& key, const std::string& data) {
         unsigned int md_len;
         unsigned char* str = HMAC(EVP_sha256(), key.c_str(), key.length(), reinterpret_cast<const unsigned char*>(data.c_str()), data.length(), nullptr, &md_len);
@@ -194,6 +181,45 @@ namespace crypto{
         return result;
     }
 
+
+    inline std::string getBinanceSignatureRest(const std::string& key, const std::string& data) {
+        unsigned char hash[EVP_MAX_MD_SIZE];
+        unsigned int length;
+        HMAC(EVP_sha256(), key.c_str(), key.length(), reinterpret_cast<const unsigned char*>(data.c_str()), data.length(), hash, &length);
+        std::stringstream ss;
+        ss << std::hex << std::setfill('0');
+        for (unsigned int i = 0; i < length; i++) {
+            ss << std::setw(2) << static_cast<int>(hash[i]);
+        }
+        
+        return ss.str();
+    }
+
+    inline std::string getGateioSignatureWs(const std::string& channel, const std::string& event, const std::string& time, const std::string& apiSecret) {
+        std::string s("");
+        s.append("channel=").append(channel).append("&event=").append(event).append("&time=").append(time);
+        std::string hmacsha512hex = crypto::encryptWithHMACForGateio(apiSecret, s);
+        return hmacsha512hex;
+    }
+
+
+    inline std::string getGateioSignatureRest(const std::string& method, const std::string& url, const std::string& time, const std::string& queryString, const std::string& payloadString, const std::string& apiSecret) {
+        std::string s("");
+        std::string hashed_payload = crypto::sha512(payloadString);
+        s.append(method).append("\n").append(url).append("\n").append(queryString).append("\n").append(hashed_payload).append("\n").append(time) ;
+        std::string hmacsha512hex = crypto::encryptWithHMACForGateio(apiSecret, s);
+        return hmacsha512hex;
+    }
+
+
+    inline std::string getGateioSignatureWsApi(const std::string& channel, const std::string& event, const std::string& time, const std::string& reqPara, const std::string& apiSecret) {
+        std::string s("");
+        s.append(event).append("\n").append(channel).append("\n").append(reqPara).append("\n").append(time);
+        std::string hmacsha512hex = crypto::encryptWithHMACForGateio(apiSecret, s);
+        return hmacsha512hex;
+    }
+
+
     inline double str2double(const std::string& s) {
         double d;
         std::stringstream ss;
@@ -226,6 +252,24 @@ namespace crypto{
             return true;
         }
         return false;
+    }
+
+    inline double fast_atod(std::string_view sv) {
+        double val = 0.0;
+        auto res = std::from_chars(sv.data(), sv.data() + sv.size(), val);
+        if (res.ec != std::errc()) {
+            return NAN;
+        }
+        return val;
+    }
+
+    inline long fast_atol(std::string_view sv) {
+        long val = 0;
+        auto res = std::from_chars(sv.data(), sv.data() + sv.size(), val);
+        if (res.ec != std::errc()) {
+            throw NAN;
+        }
+        return val;
     }
 
     inline std::string to_lower(const char* originStr) {
