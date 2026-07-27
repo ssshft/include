@@ -22,8 +22,8 @@
 #define CCY_SIZE 16
 
 #define ORIGINMSG_SIZE 256
-#define UNIXTIMESTAMP long
-#define CLIENT_ORDER_ID_TYPE long
+#define UNIXTIMESTAMP int64_t
+#define CLIENT_ORDER_ID_TYPE int64_t
 
 
 using namespace std;
@@ -388,10 +388,10 @@ namespace md {
         MarketType marketTypeEnum;
         char instId[INSTID_SIZE];
 
-        long tsTrans;
-        long tsEvent;
-        long tsRecv;
-        long tsParse;
+        int64_t tsTrans;
+        int64_t tsEvent;
+        int64_t tsRecv;
+        int64_t tsParse;
     };
 
     struct Depth1 : public MDBase {
@@ -634,7 +634,7 @@ namespace md {
     struct FundingRate : public MDBase {
         double fundingRate;
         double nextFundingRate;
-        long fundingTime;
+        int64_t fundingTime;
 
         string getString() {
             std::string s = fmt::format("exchId:{},instType:{},marketType:{},instId:{},tsTrans:{},tsEvent:{},tsRecv:{},tsParse:{},"
@@ -652,7 +652,7 @@ namespace md {
     };
 
     struct Kline : public MDBase {
-        long barTime;
+        int64_t barTime;
         double highPrice;
         double lowPrice;
         double openPrice;
@@ -760,7 +760,7 @@ namespace om {
         //来源
         ApiSource apiSourceEnum;
 
-        long updateTime;
+        int64_t updateTime;
 
         std::string getString(){
             std::string ret;
