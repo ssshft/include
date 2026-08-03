@@ -26,7 +26,7 @@ namespace crypto {
 
         inline int64_t now_ns() {
             uint64_t tsc = rdtsc();
-            if (__builtin_expect(tsc - last_sync_tsc > sync_interval_, 0)) {
+            if (__builtin_expect(tsc - last_sync_tsc_ > sync_interval_, 0)) {
                 resync(tsc);
             }
 
@@ -149,7 +149,7 @@ namespace crypto {
         return tv.tv_sec;
     }
 
-    inline string getTimestamp() {
+    inline std::string getTimestamp() {
         char timestamp[32]{0};
         time_t t;
         time(&t);
@@ -158,7 +158,7 @@ namespace crypto {
         return timestamp;
     }
 
-    inline string get_date_str(){
+    inline std::string get_date_str(){
         char dateStr[16] = {0};
         struct timeval tv;
         gettimeofday(&tv,NULL);
@@ -170,6 +170,6 @@ namespace crypto {
                 tm_now->tm_year + 1900,
                 tm_now->tm_mon + 1,
                 tm_now->tm_mday  );
-        return string(dateStr);
+        return std::string(dateStr);
     }
 }

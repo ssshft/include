@@ -440,6 +440,15 @@ namespace crypto{
             pos += replace.length();
         }
     }
+
+    template <size_t N>
+    inline void copy_sv_to_char_array(char (&dst)[N], std::string_view src) noexcept {
+        size_t n = std::min<size_t>(src.size(), N - 1);
+        if (n > 0) {
+            std::memcpy(dst, src.data(), n);
+        }
+        dst[n] = '\0';
+    }
 }
 
 

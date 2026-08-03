@@ -45,8 +45,8 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/ssl.hpp>
 #include <boost/lockfree/spsc_queue.hpp>
-#include <boost/system/errc.hpp>
 #include <algorithm>
+#include <system_error>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -364,7 +364,7 @@ namespace net {
                 // 池满 → 立即在 caller 线程回调 fast-fail。
                 // 用户契约: callback 不抛。若违约属于用户 bug, 不在 hot path 兜底。
                 HttpResponse resp;
-                boost::system::error_code ec(boost::system::errc::no_buffer_space,
+                boost::system::error_code ec(static_cast<int>(std::errc::no_buffer_space),
                                              boost::system::system_category());
                 callback(ec, std::move(resp));
                 total_err_.fetch_add(1, std::memory_order_relaxed);
@@ -381,7 +381,7 @@ namespace net {
             if (!req_queue_.push(req)) {
                 // queue 满 → 立即在 caller 线程回调
                 HttpResponse resp;
-                boost::system::error_code ec(boost::system::errc::no_stream_resources,
+                boost::system::error_code ec(static_cast<int>(std::errc::no_stream_resources),
                                              boost::system::system_category());
                 req->callback(ec, std::move(resp));
                 req_pool_.free_from_caller(req);
@@ -561,7 +561,7 @@ namespace net {
             }
             // 无空闲连接,立即回调错误
             HttpResponse resp;
-            boost::system::error_code ec(boost::system::errc::no_stream_resources,
+            boost::system::error_code ec(static_cast<int>(std::errc::no_stream_resources),
                                          boost::system::system_category());
             req->callback(ec, std::move(resp));
             req_pool_.free_from_worker(req);

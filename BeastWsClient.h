@@ -582,8 +582,8 @@ private:
     }
 
     struct ParsedUrl { 
-        std::string host, 
-        std::string port, 
+        std::string host;
+        std::string port; 
         std::string target; 
     };
 

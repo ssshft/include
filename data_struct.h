@@ -302,10 +302,11 @@ namespace md {
         double minAmount;//最小下单金额
         double magnifyNumber;//放大倍数
         double reduceNumber;//magnifyNumber倒数
+        int64_t instIdCode; // okx code, sbe行情用到
 
         std::string getString() {
             std::string s = fmt::format("{},{},{},{},{},{},{},"
-                            "{},{},{},{},{},{},{},{}",
+                            "{},{},{},{},{},{},{},{},{}",
                             ExchangeTypeEnum2StrMap[exchangeTypeEnum],
                             InstTypeEnum2StrMap[instTypeEnum], 
                             instId, 
@@ -320,7 +321,8 @@ namespace md {
                             maxSize,
                             minAmount,
                             magnifyNumber,
-                            reduceNumber
+                            reduceNumber,
+                            instIdCode
                         );
             return s;
         }
@@ -375,6 +377,9 @@ namespace md {
             
             writer.Key("reduceNumber");
             writer.Double(reduceNumber);
+                        
+            writer.Key("instIdCode");
+            writer.Double(instIdCode);
             
             writer.EndObject();
             
