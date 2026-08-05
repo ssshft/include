@@ -57,7 +57,7 @@ namespace sm::shm {
 // ============================================================================
 constexpr uint32_t    kInfoShmMagic     = 0x494E5354;   // 'INST' little-endian
 constexpr uint32_t    kInfoShmVersion   = 1;
-constexpr const char* kDefaultShmName   = "/bts_instrument_info";
+constexpr const char* kDefaultShmName   = "/hft_instrument_info";
 constexpr uint32_t    kDefaultCapacity  = 16384;
 
 

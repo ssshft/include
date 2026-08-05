@@ -2,7 +2,7 @@
 # hft 开发+构建镜像 在hft目录下
 #
 # 用法:
-#   docker build -t hft_dev -f include/hft.dockfile .
+#   docker build -t hft_dev -f include/hft.dockerfile .
 #   docker run -itd --name hft_dev_img1 -v .:/workspace hft_dev
 #   cd /workspace/<subproject> && mkdir -p build && cd build && cmake .. && make -j
 #

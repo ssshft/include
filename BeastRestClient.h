@@ -627,7 +627,7 @@ namespace net {
                 conn->http_req.set(kv.first, kv.second);
             }
 
-            for (auto& kv : extra_headers) {
+            for (auto& kv : req->extra_headers) {
                 conn->http_req.set(kv.first, kv.second);
             }
 
