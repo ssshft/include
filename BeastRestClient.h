@@ -173,6 +173,8 @@ namespace net {
         std::string path;
         std::string body;
         std::string content_type;
+        // gate 每次都要改变sign/timestamp
+        std::vector<std::pair<std::string, std::string>> extra_headers;
         HttpCallback callback;
         std::chrono::steady_clock::time_point start_time;
         Request* next_free = nullptr;
@@ -245,6 +247,7 @@ namespace net {
             r->path.clear();
             r->body.clear();
             r->content_type.clear();
+            r->extra_headers.clear();
             r->callback = nullptr;
             r->next_free = nullptr;
         }
@@ -359,6 +362,17 @@ namespace net {
                            std::string content_type,
                            HttpCallback callback)
         {
+            async_request(method, std::move(path), std::move(body), std::move(content_type), {}, std::move(callback));
+        }
+
+        // extra_headers 会覆盖 default_headers
+        void async_request(http::verb method,
+                           std::string path,
+                           std::string body,
+                           std::string content_type,
+                           std::vector<std::pair<std::string, std::string>> extra_headers,
+                           HttpCallback callback)
+        {
             Request* req = req_pool_.alloc();
             if (!req) {
                 // 池满 → 立即在 caller 线程回调 fast-fail。
@@ -375,6 +389,7 @@ namespace net {
             req->path         = std::move(path);
             req->body         = std::move(body);
             req->content_type = std::move(content_type);
+            req->extra_headers = std::move(extra_headers);
             req->callback     = std::move(callback);
             req->start_time   = std::chrono::steady_clock::now();
 
@@ -609,6 +624,10 @@ namespace net {
             // 应用默认 header (X-MBX-APIKEY 等). 这些 header 已在 base().clear() 中被清除,
             // 所以每次都要重新 set。
             for (auto& kv : default_headers_) {
+                conn->http_req.set(kv.first, kv.second);
+            }
+
+            for (auto& kv : extra_headers) {
                 conn->http_req.set(kv.first, kv.second);
             }
 

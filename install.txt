@@ -1,0 +1,25 @@
+apt-get install openssl-devel
+apt-get install openssl
+apt install libboost-all-dev
+apt install libcpprest-dev
+apt install libtbb-dev
+
+
+
+apt install sqlite3 libsqlite3-dev
+apt install libnanomsg-dev
+apt install rapidjson-dev
+apt install redis-server
+apt install mysql-server
+apt install libmysql++-dev 
+
+git clone https://github.com/fmtlib/fmt.git
+git clone https://github.com/cpp-redis/cpp_redis.git
+git clone https://github.com/MengRao/fmtlog.git
+git clone https://github.com/SqliteModernCpp/sqlite_modern_cpp.git
+git clone https://github.com/MengRao/NanoLogLite.git
+git clone https://github.com/cameron314/concurrentqueue.git
+git clone https://github.com/zeromq/libzmq.git
+git clone https://github.com/zeromq/cppzmq.git
+git clone https://github.com/libuv/libuv.git
+git clone https://github.com/simdjson/simdjson.git
