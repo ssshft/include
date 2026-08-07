@@ -34,7 +34,7 @@
 #pragma once
 
 #include "data_struct.h"
-
+#include "log_engine.h"
 #include <atomic>
 #include <cerrno>
 #include <chrono>

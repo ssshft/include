@@ -15,12 +15,19 @@
 
 using namespace rapidjson;
 
+struct SbeAccount {
+    std::string apiKey{""};
+    std::string secretKey{""};
+    std::string password{""};    
+};
+
 struct ExchangeNode {
     std::string exchangeId;
     int tokenLot;
     std::vector<std::string> instType;
     std::vector<std::string> marketType;
     std::vector<std::string> instId;
+    SbeAccount sbeAccount;
     
     ExchangeNode(const std::string& exchId = "", int lot = 30) : exchangeId(exchId), tokenLot(lot) {}
 };
@@ -99,6 +106,24 @@ public:
             }
             for (rapidjson::SizeType i = 0; i < exchange["instId"].Size(); i++) {
                 node.instId.push_back(exchange["instId"][i].GetString());
+            }
+
+            if (exchange.HasMember("sbe")) {
+                auto& sbe = exchange["sbe"];
+                SbeAccount sbeAccount;
+                if (sbe.HasMember("apiKey")) {
+                    sbeAccount.apiKey = sbe["apiKey"].GetString();
+                }
+
+                if (sbe.HasMember("secretKey")) {
+                    sbeAccount.secretKey = sbe["secretKey"].GetString()
+                }
+
+                if (sbe.HasMember("password")) {
+                    sbeAccount.password = sbe["password"].GetString();
+                }
+
+                node.sbeAccount = sbeAccount;
             }
             
             mExchange[key] = node;
