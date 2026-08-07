@@ -116,7 +116,7 @@ public:
                 }
 
                 if (sbe.HasMember("secretKey")) {
-                    sbeAccount.secretKey = sbe["secretKey"].GetString()
+                    sbeAccount.secretKey = sbe["secretKey"].GetString();
                 }
 
                 if (sbe.HasMember("password")) {
