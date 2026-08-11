@@ -43,9 +43,16 @@ public:
     Ed25519Signer(const Ed25519Signer&) = delete;
     Ed25519Signer& operator=(const Ed25519Signer&) = delete;
 
-    Ed25519Signer(Ed25519Signer&& o) noexcept : pkey_(o.pkey_) { o.pkey_ = nullptr; }
+    Ed25519Signer(Ed25519Signer&& o) noexcept : pkey_(o.pkey_) { 
+        o.pkey_ = nullptr; 
+    }
+
     Ed25519Signer& operator=(Ed25519Signer&& o) noexcept {
-        if (this != &o) { reset(); pkey_ = o.pkey_; o.pkey_ = nullptr; }
+        if (this != &o) { 
+            reset(); 
+            pkey_ = o.pkey_; 
+            o.pkey_ = nullptr; 
+        }
         return *this;
     }
 
@@ -53,7 +60,9 @@ public:
     // 输入里的 "\\n" (JSON 里存 PEM 时常见的 escape 形式) 会被自动展开为 '\n'。
     bool init_from_pem(std::string pem) {
         reset();
-        if (pem.empty()) return false;
+        if (pem.empty()) {
+            return false;
+        }
 
         // "\\n" → "\n"
         for (size_t p = 0; (p = pem.find("\\n", p)) != std::string::npos; ) {
@@ -67,7 +76,10 @@ public:
             if (bio) {
                 EVP_PKEY* pkey = PEM_read_bio_PrivateKey(bio, nullptr, nullptr, nullptr);
                 BIO_free(bio);
-                if (pkey) { pkey_ = pkey; return true; }
+                if (pkey) { 
+                    pkey_ = pkey; 
+                    return true; 
+                }
             }
         }
 
@@ -81,9 +93,11 @@ public:
                 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20
             };
             if (std::memcmp(der.data(), kPrefix, 16) == 0) {
-                EVP_PKEY* pkey = EVP_PKEY_new_raw_private_key(
-                    EVP_PKEY_ED25519, nullptr, der.data() + 16, 32);
-                if (pkey) { pkey_ = pkey; return true; }
+                EVP_PKEY* pkey = EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, nullptr, der.data() + 16, 32);
+                if (pkey) { 
+                    pkey_ = pkey; 
+                    return true; 
+                }
             }
         }
         return false;
@@ -103,16 +117,12 @@ public:
             return {};
         }
         size_t siglen = 0;
-        if (EVP_DigestSign(ctx, nullptr, &siglen,
-                           reinterpret_cast<const unsigned char*>(payload.data()),
-                           payload.size()) <= 0) {
+        if (EVP_DigestSign(ctx, nullptr, &siglen, reinterpret_cast<const unsigned char*>(payload.data()), payload.size()) <= 0) {
             EVP_MD_CTX_free(ctx);
             return {};
         }
         std::vector<unsigned char> sig(siglen);
-        if (EVP_DigestSign(ctx, sig.data(), &siglen,
-                           reinterpret_cast<const unsigned char*>(payload.data()),
-                           payload.size()) <= 0) {
+        if (EVP_DigestSign(ctx, sig.data(), &siglen, reinterpret_cast<const unsigned char*>(payload.data()), payload.size()) <= 0) {
             EVP_MD_CTX_free(ctx);
             return {};
         }
@@ -124,7 +134,10 @@ public:
 
 private:
     void reset() noexcept {
-        if (pkey_) { EVP_PKEY_free(pkey_); pkey_ = nullptr; }
+        if (pkey_) { 
+            EVP_PKEY_free(pkey_); 
+            pkey_ = nullptr; 
+        }
     }
 
     // 只保留 base64 字母表字符 (A-Za-z0-9+/=), 用来从 PEM (含空白/注释) 抽 base64 body
@@ -145,11 +158,14 @@ private:
         BIO* bmem = BIO_new_mem_buf(b64.data(), static_cast<int>(b64.size()));
         BIO* b64f = BIO_new(BIO_f_base64());
         BIO_set_flags(b64f, BIO_FLAGS_BASE64_NO_NL);
-        BIO* bio  = BIO_push(b64f, bmem);
+        BIO* bio = BIO_push(b64f, bmem);
         out.resize((b64.size() * 3) / 4 + 4);
         int n = BIO_read(bio, out.data(), static_cast<int>(out.size()));
         BIO_free_all(bio);
-        if (n <= 0) { out.clear(); return out; }
+        if (n <= 0) { 
+            out.clear(); 
+            return out; 
+        }
         out.resize(static_cast<size_t>(n));
         return out;
     }

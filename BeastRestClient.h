@@ -151,6 +151,11 @@ namespace net {
         // 池大小:**硬上限**, 用满后 async_request 立即 fast-fail。
         // 设为 max_connections * 4 ~ 8 即可 (在线 ≤ max_connections, 余量给归还流水)。
         size_t      request_pool_size = 64;
+
+        // keep-alive 主动关闭阈值(ms): idle中的conn空闲超过该时长，woker主动关掉并触发async重连，防止撞交易所服务端FIN后的stale-keepalive EOF
+        // binance/okx/bybit/gateio 服务端keep-alive ~30s，建议设置25s
+        // 0 = 关闭
+        int idle_close_after_ms = 0;
     };
 
     // ========================================================================
@@ -290,16 +295,17 @@ namespace net {
             // ---- 2. 预创建 Connection 对象 (不握手, 只构造) ----
             connections_.reserve(cfg_.max_connections);
             for (size_t i = 0; i < cfg_.max_connections; ++i) {
-                connections_.push_back(
-                    std::make_unique<Connection>(ioc_, ssl_ctx_));
+                connections_.push_back(std::make_unique<Connection>(ioc_, ssl_ctx_));
             }
 
             // ---- 3. 并行 establish (N 个临时线程同时握手) ----
             parallel_establish_all();
 
             // ---- 4. 收集成功建连的 idle 索引 ----
+            auto init_now = std::chrono::steady_clock::now();
             for (size_t i = 0; i < connections_.size(); ++i) {
                 if (!connections_[i]->dead) {
+                    connections_[i]->last_release_time = init_now;
                     idle_indices_.push(i);
                 }
             }
@@ -324,9 +330,7 @@ namespace net {
             // (2) 兜底 pending 请求 — worker 已退, 此处 dtor 线程是唯一的 SPSC consumer。
             {
                 Request* pending = nullptr;
-                boost::system::error_code abort_ec(
-                    boost::asio::error::operation_aborted,
-                    boost::asio::error::get_system_category());
+                boost::system::error_code abort_ec(boost::asio::error::operation_aborted, boost::asio::error::get_system_category());
                 while (req_queue_.pop(pending)) {
                     try {
                         HttpResponse resp;
@@ -437,6 +441,10 @@ namespace net {
             uint32_t retry_backoff_ms = 0;   // 上次失败的 backoff 长度; 0 = 首次失败
             std::chrono::steady_clock::time_point next_retry_at;  // 早于此时间禁止 retry
 
+            // 记录上次进入idle池的时间，用于idle_close_after_ms判定stale
+            // 只在woker线程读写，无需atomic
+            std::chrono::steady_clock::time_point last_release_time;
+
             Connection(asio::io_context& ioc, ssl::context& ctx)
                 : stream(std::make_unique<StreamType>(ioc, ctx)) {}
 
@@ -522,6 +530,7 @@ namespace net {
                 pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
             }
             auto last_reconnect_check = std::chrono::steady_clock::now();
+            auto last_idle_scan = last_reconnect_check;
 
             while (!stop_.load(std::memory_order_acquire)) {
                 bool busy = false;
@@ -544,6 +553,13 @@ namespace net {
                     reconnect_dead_connections();
                     last_reconnect_check = now;
                 }
+
+                // 每1s扫一次idle池，关掉stale conn
+                if (cfg_.idle_close_after_ms > 0 && now - last_idle_scan > std::chrono::seconds(1)) {
+                    close_stale_idle_connection(now);
+                    last_idle_scan = now;
+                }
+
 
                 // 4. 空闲 spin (HFT 模式: 不睡, pause + yield)
                 if (!busy) {
@@ -586,10 +602,36 @@ namespace net {
         void release_connection(size_t idx, bool alive) {
             Connection* conn = connections_[idx].get();
             if (alive && !conn->dead) {
+                conn->last_release_time = std::chrono::steady_clock::now();
                 idle_indices_.push(idx);
                 idle_count_atomic_.fetch_add(1, std::memory_order_relaxed);
             } else {
                 conn->dead = true;
+                start_reconnect(idx);
+            }
+        }
+
+        // 主动关掉超过idle_close_after_ms的idle conn, woker单线程调用与派发(try_dispatch)不会race
+        void close_stale_idle_connection(std::chrono::steady_clock::time_point now) {
+            auto max_idle = std::chrono::milliseconds(cfg_.idle_close_after_ms);
+            size_t n = idle_indices_.size();
+            for (size_t i = 0; i < n; ++i) {
+                size_t idx = idle_indices_.pop_front();
+                Connection* conn = connections_[idx].get();
+                if (conn->dead) {
+                    idle_count_atomic_.fetch_sub(1, std::memory_order_relaxed);
+                    continue;
+                }
+
+                auto age = now - conn->last_release_time;
+                if (age > max_idle) {
+                    conn->dead = true;
+                    idle_count_atomic_.fetch_sub(1, std::memory_order_relaxed);
+                    start_reconnect(idx);
+                }
+                else {
+                    idle_indices_.push(idx); // 未过期原样回 tail (保持FIFO)
+                }
             }
         }
 
@@ -735,6 +777,7 @@ namespace net {
             conn->dead = false;
             conn->retry_backoff_ms = 0;
             conn->next_retry_at = {};
+            conn->last_release_time = std::chrono::steady_clock::now();
             idle_indices_.push(idx);
             idle_count_atomic_.fetch_add(1, std::memory_order_relaxed);
             total_reconn_.fetch_add(1, std::memory_order_relaxed);
