@@ -940,6 +940,24 @@ namespace om {
     };
 };
 
+enum ApiMode {
+    AM_MIN = 0,
+    AM_REST = 1,
+    AM_WS = 2
+};
+
+static std::unordered_map<std::string, ApiMode> ApiModeStr2EnumMap {
+    {"AM_MIN", AM_MIN},
+    {"REST", AM_REST},
+    {"WS", AM_WS}
+};
+
+static std::unordered_map<ApiMode, std::string> ApiModeEnum2StrMap {
+    {AM_MIN, "AM_MIN"},
+    {AM_REST, "REST"},
+    {AM_WS, "WS"}
+};
+
 struct AccountCfg {
     ExchangeType exchangeTypeEnum;
     InstType instTypeEnum;
@@ -952,4 +970,5 @@ struct AccountCfg {
     bool isSimulated{false};
 	std::string restUrl{""};
 	std::string wsUrl{""};
+    ApiMode apiMode{AM_REST};
 };

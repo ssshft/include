@@ -578,15 +578,29 @@ namespace net {
             //   1) 冷 conn 被交易所/防火墙 keep-alive timeout RST
             //   2) TLS session cache / TCP cwnd 退化
             // N=8 时 erase(begin()) ≈ 一个 cacheline 的 memmove, 可忽略。
+
+            auto now = std::chrono::steady_clock::now();
+            const auto max_idle = std::chrono::milliseconds(cfg_.idle_close_after_ms);
+            const bool enable_age_check = cfg_.idle_close_after_ms > 0;
+
             while (!idle_indices_.empty()) {
                 size_t idx = idle_indices_.pop_front();
                 idle_count_atomic_.fetch_sub(1, std::memory_order_relaxed);
                 Connection* conn = connections_[idx].get();
-                if (!conn->dead) {
-                    total_sent_.fetch_add(1, std::memory_order_relaxed);
-                    send_request(conn, req, idx);
-                    return;
+                if (conn->dead) {
+                    continue;
                 }
+
+                if (enable_age_check && now - conn->last_release_time > max_idle) {
+                    conn->dead = true;
+                    start_reconnect(idx);
+                    continue;
+                }
+
+                total_sent_.fetch_add(1, std::memory_order_relaxed);
+                send_request(conn, req, idx);
+                return;
+                
                 // dead conn 还在 idle_indices_ 是历史路径残留 (理论上 release 应该过滤掉),
                 // 继续找下一个 alive 的
             }
