@@ -343,10 +343,10 @@ namespace pubsub {
 	        TotalAccount totalAccount;
         };
         CommandBody  body;
-
+        
         std::string getString() {
             string ret = fmt::format("[{}]", CommandTypeEnum2StrMap[cmdTypeEnum]);
-            if (cmdTypeEnum == CMD_RPT_ORDER_RESPONSE) {
+            if (cmdTypeEnum == CMD_RPT_ORDER_RESPONSE || cmdTypeEnum == CMD_RPT_NEW_ORDER || cmdTypeEnum == CMD_RPT_CANCEL_ORDER || cmdTypeEnum == CMD_RPT_QUERY_ORDER) {
                 ret.append(body.orderResponse.getString());
             }
             else if (cmdTypeEnum == CMD_RPT_BALANCE) {
