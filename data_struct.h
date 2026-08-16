@@ -970,5 +970,6 @@ struct AccountCfg {
     bool isSimulated{false};
 	std::string restUrl{""};
 	std::string wsUrl{""};
+    std::string wsTradeUrl{""};
     ApiMode apiMode{AM_REST};
 };
