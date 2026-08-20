@@ -267,7 +267,7 @@ namespace crypto{
         long val = 0;
         auto res = std::from_chars(sv.data(), sv.data() + sv.size(), val);
         if (res.ec != std::errc()) {
-            throw NAN;
+            return NAN;
         }
         return val;
     }
