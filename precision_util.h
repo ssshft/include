@@ -22,4 +22,18 @@ namespace crypto {
         int64_t n = static_cast<int64_t>(std::floor(scaled));
         return n * precision;
     }
+
+    static constexpr double POW10[] = {
+        1.0,
+        0.1,
+        0.01,
+        0.001,
+        0.0001,
+        0.00001,
+        0.000001,
+        0.0000001,
+        0.00000001,
+        0.000000001,
+        0.0000000001,
+    };
 }
