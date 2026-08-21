@@ -149,13 +149,19 @@ namespace crypto {
         return tv.tv_sec;
     }
 
-    inline std::string getTimestamp() {
-        char timestamp[32]{0};
-        time_t t;
-        time(&t);
-        struct tm* ptm = gmtime(&t);
-        strftime(timestamp, 32, "%FT%T.123Z", ptm);
-        return timestamp;
+    inline std::string getTimestampIso() {
+        using namespace std::chrono;
+        auto now = system_clock::now();
+        auto ms  = duration_cast<milliseconds>(now.time_since_epoch()) % 1000;
+        std::time_t t = system_clock::to_time_t(now);
+        std::tm tm{};
+        gmtime_r(&t, &tm);
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03lldZ",
+                      tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                      tm.tm_hour, tm.tm_min, tm.tm_sec,
+                      static_cast<long long>(ms.count()));
+        return buf;
     }
 
     inline std::string get_date_str(){

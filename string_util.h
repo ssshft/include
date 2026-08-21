@@ -73,17 +73,18 @@ namespace crypto{
         return hash;
     }
 
+
+    // 通用: HMAC-SHA256 → base64 (OKX API 用这个格式, 不是 hex)
+    inline std::string hmacSha256Base64(const std::string& key, const std::string& data) {
+        unsigned char digest[EVP_MAX_MD_SIZE];
+        unsigned int  digest_len = 0;
+        HMAC(EVP_sha256(), key.data(), static_cast<int>(key.size()), reinterpret_cast<const unsigned char*>(data.data()), data.size(), digest, &digest_len);
+        return websocketpp::base64_encode(digest, digest_len);
+    }
+
+    // 老函数名, 保持向后兼容 (原实现返回 hex 是 bug, 没被使用; 现修正为 base64)
     inline std::string HmacEncodeOKX(const std::string& key, const std::string& data) {
-        unsigned char hash[EVP_MAX_MD_SIZE];
-        unsigned int length;
-        HMAC(EVP_sha256(), key.c_str(), key.length(), reinterpret_cast<const unsigned char*>(data.c_str()), data.length(), hash, &length);
-        std::stringstream ss;
-        ss << std::hex << std::setfill('0');
-        for (unsigned int i = 0; i < length; i++) {
-            ss << std::setw(2) << static_cast<int>(hash[i]);
-        }
-        
-        return ss.str();
+        return hmacSha256Base64(key, data);
     }
 
     inline std::string HmacEncodeBybit(const std::string& key, const std::string& data) {
@@ -211,13 +212,34 @@ namespace crypto{
         return hmacsha512hex;
     }
 
-
     inline std::string getGateioSignatureWsApi(const std::string& channel, const std::string& event, const std::string& time, const std::string& reqPara, const std::string& apiSecret) {
         std::string s("");
         s.append(event).append("\n").append(channel).append("\n").append(reqPara).append("\n").append(time);
         std::string hmacsha512hex = crypto::encryptWithHMACForGateio(apiSecret, s);
         return hmacsha512hex;
     }
+
+    // OKX REST 签名: payload = timestamp + method(大写) + requestPath + body
+    // 用于 REST 请求头 OK-ACCESS-SIGN
+    inline std::string getOkxSignatureRest(const std::string& apiSecret, const std::string& timestamp, const std::string& method, const std::string& requestPath, const std::string& body) {
+        std::string s;
+        s.reserve(timestamp.size() + method.size() + requestPath.size() + body.size());
+        s.append(timestamp).append(method).append(requestPath).append(body);
+        return crypto::hmacSha256Base64(apiSecret, s);
+    }
+
+    // OKX WS login 签名: payload 固定 = timestamp(秒字符串) + "GET" + "/users/self/verify"
+    // 用于 WebSocket op=login 的 args.sign
+    inline std::string getOkxSignatureWsLogin(const std::string& apiSecret, const std::string& timestamp_sec, const std::string& requestPath) {
+        std::string s;
+        s.reserve(timestamp_sec.size() + 25);
+        // s.append(timestamp_sec).append("GET/users/self/verify");
+        s.append(timestamp_sec).append(requestPath);
+        return crypto::hmacSha256Base64(apiSecret, s);
+    }
+
+
+
 
 
     inline double str2double(const std::string& s) {
