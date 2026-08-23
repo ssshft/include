@@ -82,6 +82,22 @@ namespace crypto{
         return websocketpp::base64_encode(digest, digest_len);
     }
 
+    // 通用: HMAC-SHA256 → hex (Bybit / Binance REST 用)
+    inline std::string hmacSha256Hex(const std::string& key, const std::string& data) {
+        unsigned char hash[EVP_MAX_MD_SIZE];
+        unsigned int  length = 0;
+        HMAC(EVP_sha256(), key.data(), static_cast<int>(key.size()), reinterpret_cast<const unsigned char*>(data.data()), data.size(), hash, &length);
+        std::string out;
+        out.reserve(length * 2);
+        static const char* hex = "0123456789abcdef";
+        for (unsigned int i = 0; i < length; ++i) {
+            out.push_back(hex[hash[i] >> 4]);
+            out.push_back(hex[hash[i] & 0x0F]);
+        }
+        return out;
+    }
+
+
     // 老函数名, 保持向后兼容 (原实现返回 hex 是 bug, 没被使用; 现修正为 base64)
     inline std::string HmacEncodeOKX(const std::string& key, const std::string& data) {
         return hmacSha256Base64(key, data);
@@ -238,9 +254,28 @@ namespace crypto{
         return crypto::hmacSha256Base64(apiSecret, s);
     }
 
+   // =========================================================================
+    // Bybit 签名 (HMAC-SHA256 → hex, 跟 Gateio/OKX 风格一致的 payload 拼串封装)
+    //
+    //   Bybit V5 有两种签名场景:
+    //     REST 头:      payload = timestamp + apiKey + recvWindow + body
+    //                   → X-BAPI-SIGN
+    //     WS op=auth:   payload = "GET/realtime" + expires_ms
+    //                   → op=auth 的 args[2]
+    // =========================================================================
+    inline std::string getBybitSignatureRest(const std::string& apiSecret, const std::string& timestamp_ms, const std::string& apiKey, const std::string& recvWindow, const std::string& body) {
+        std::string s;
+        s.reserve(timestamp_ms.size() + apiKey.size() + recvWindow.size() + body.size());
+        s.append(timestamp_ms).append(apiKey).append(recvWindow).append(body);
+        return crypto::hmacSha256Hex(apiSecret, s);
+    }
 
-
-
+    inline std::string getBybitSignatureWsAuth(const std::string& apiSecret, const std::string& timestamp_ms, const std::string& requestPath) {
+        std::string s;
+        s.reserve(12 + 16);   // "GET/realtime" + 毫秒时间戳
+        s.append(requestPath).append(timestamp_ms);
+        return crypto::hmacSha256Hex(apiSecret, s);
+    }
 
     inline double str2double(const std::string& s) {
         double d;
