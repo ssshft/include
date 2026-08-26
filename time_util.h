@@ -69,7 +69,7 @@ namespace crypto {
             uint64_t t1 = rdtsc();
             struct timespec ts1;
             clock_gettime(CLOCK_REALTIME, &ts1);
-            struct timespec req{0, 100000000};
+            struct timespec req{0, 100000000LL};
             nanosleep(&req, nullptr);
 
             uint64_t t2 = rdtsc();
@@ -99,51 +99,46 @@ namespace crypto {
     }
 
 
-
-
-
-
     //产生(10,1000]的真随机数
     static std::random_device rd;
     static std::atomic<long> atomic_rdtscp_count((rd() % (100-1))+1);
 
-    inline long rdtscp(){
+    inline int64_t rdtscp(){
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME,&ts);
-        return (ts.tv_sec + atomic_rdtscp_count++) * 1000000000 + ts.tv_nsec;
+        return (ts.tv_sec + atomic_rdtscp_count++) * 1000000000LL + ts.tv_nsec;
     }
    
-    inline unsigned long rdtsc() {
+    inline unsigned int64_t rdtsc() {
         return __builtin_ia32_rdtsc();
     }
 
-    inline uint64_t get_rdtsc_timestamp() {
+    inline int64_t get_rdtsc_timestamp() {
         uint32_t lo, hi;
 
         asm volatile("rdtsc": "=a"(lo), "=d"(hi));
-        return ((uint64_t)hi << 32) | lo;
+        return ((int64_t)hi << 32) | lo;
     }
 
-    inline long getCurrentTimeNano() { // ns
+    inline int64_t getCurrentTimeNano() { // ns
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME,&ts);
-        return ts.tv_sec*1000000000+ts.tv_nsec;
+        return ts.tv_sec * 1000000000LL + ts.tv_nsec;
     }
 
-    inline long getCurrentTime(){ // us
+    inline int64_t getCurrentTime() { // us
         struct timeval tv;
         gettimeofday(&tv, NULL);    //该函数在sys/time.h头文件中
-        return tv.tv_sec * 1000000 + tv.tv_usec ;
+        return tv.tv_sec * 1000000LL + tv.tv_usec ;
     }
 
-    inline long getCurrentTimeMilli() // ms
-    {
+    inline int64_t getCurrentTimeMilli() { // ms 
         struct timeval tv;
         gettimeofday(&tv, NULL);    //该函数在sys/time.h头文件中
         return (long)(tv.tv_sec * 1000 + tv.tv_usec * 0.001);
     }
 
-    inline long getCurrentTimeSeconds(){ // s
+    inline int64_t getCurrentTimeSeconds(){ // s
         struct timeval tv;
         gettimeofday(&tv, NULL);
         return tv.tv_sec;

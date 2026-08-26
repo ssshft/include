@@ -64,7 +64,8 @@ namespace pubsub {
     struct NewOrder {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
-        char accountId[ACCOUNTID_SIZE];
+        int accountId;
+        char accountName[ACCOUNTID_SIZE];
         char strategyId[STRATEGYID_SIZE];
 
         char instId[INSTID_SIZE];
@@ -79,10 +80,10 @@ namespace pubsub {
         bool reduceOnly;
 
         std::string getString() {
-            const std::string s = fmt::format("[NewOrder] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, strategyId:{}, "
+            const std::string s = fmt::format("[NewOrder] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, "
                             "instId:{}, clientOrderId:{}, orderSysId:{}, strategyRef:{}, offsetFlag:{}, "
                             "direction:{}, orderType:{}, volumeTotal:{}, limitPrice:{}, reduceOnly:{}",
-                            ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, strategyId,
+                            ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId,
                             instId, clientOrderId, orderSysId, strategyRef, OffsetFlagEnum2StrMap[offsetFlag],
                             DirectionEnum2StrMap[direction], OrderTypeEnum2StrMap[orderType], volumeTotal,
                             limitPrice, reduceOnly);
@@ -93,7 +94,8 @@ namespace pubsub {
     struct CancelOrder {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
-        char accountId[ACCOUNTID_SIZE];
+        int accountId;
+        char accountName[ACCOUNTID_SIZE];
         char strategyId[STRATEGYID_SIZE];
 
         char instId[INSTID_SIZE];
@@ -102,9 +104,9 @@ namespace pubsub {
         char orderId[ORDER_SIZE];
 
         std::string getString() {
-            const std::string s = fmt::format("[CancelOrder] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, strategyId:{}, "
+            const std::string s = fmt::format("[CancelOrder] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, "
                             "instId:{}, clientOrderId:{}, orderSysId:{}, orderId:{}",
-                            ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, strategyId,
+                            ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId,
                             instId, clientOrderId, orderSysId, orderId);
             return s;     
         }
@@ -113,7 +115,8 @@ namespace pubsub {
     struct QueryOrder {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
-        char accountId[ACCOUNTID_SIZE];
+        int accountId;
+        char accountName[ACCOUNTID_SIZE];
         char strategyId[STRATEGYID_SIZE];
 
         char instId[INSTID_SIZE];
@@ -122,9 +125,9 @@ namespace pubsub {
         char orderId[ORDER_SIZE];
 
         std::string getString() {
-            const std::string s = fmt::format("[QueryOrder] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, strategyId:{}, "
+            const std::string s = fmt::format("[QueryOrder] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, "
                             "instId:{}, clientOrderId:{}, orderSysId:{}, orderId:{}",
-                            ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, strategyId,
+                            ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId,
                             instId, clientOrderId, orderSysId, orderId);
             return s;     
         }
@@ -133,12 +136,13 @@ namespace pubsub {
     struct QueryAccount {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
-        char accountId[ACCOUNTID_SIZE];
+        int accountId;
+        char accountName[ACCOUNTID_SIZE];
         char strategyId[STRATEGYID_SIZE];
 
         std::string getString() {
-            const std::string s = fmt::format("[QueryAccount] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, strategyId:{}",
-                            ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, strategyId);
+            const std::string s = fmt::format("[QueryAccount] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}",
+                            ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId);
             return s;     
         }
     };
@@ -146,14 +150,15 @@ namespace pubsub {
     struct QueryBalance {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
-        char accountId[ACCOUNTID_SIZE];
+        int accountId;
+        char accountName[ACCOUNTID_SIZE];
         char strategyId[STRATEGYID_SIZE];
 
         char currency[INSTID_SIZE];
 
         std::string getString() {
-            const std::string s = fmt::format("[QueryAccount] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, strategyId:{}, currency:{}",
-                            ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, strategyId, currency);
+            const std::string s = fmt::format("[QueryAccount] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, currency:{}",
+                            ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId, currency);
             return s;     
         }
     };
@@ -161,14 +166,15 @@ namespace pubsub {
     struct QueryPosition {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
-        char accountId[ACCOUNTID_SIZE];
+        int accountId;
+        char accountName[ACCOUNTID_SIZE];
         char strategyId[STRATEGYID_SIZE];
 
         char instId[INSTID_SIZE];
 
         std::string getString() {
-            const std::string s = fmt::format("[QueryPosition] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, strategyId:{}, instId:{}",
-                            ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, strategyId, instId);
+            const std::string s = fmt::format("[QueryPosition] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, instId:{}",
+                            ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId, instId);
             return s;     
         }
     };
@@ -176,7 +182,8 @@ namespace pubsub {
     struct OrderResponse {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
-        char accountId[ACCOUNTID_SIZE];
+        int accountId;
+        char accountName[ACCOUNTID_SIZE];
         char strategyId[STRATEGYID_SIZE];
 
         char instId[INSTID_SIZE];
@@ -204,11 +211,11 @@ namespace pubsub {
         ApiSource apiSourceEnum;
         
         std::string getString() {
-            const std::string& s = fmt::format("[OrderResponse] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, strategyId:{}, "
+            const std::string& s = fmt::format("[OrderResponse] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, "
                                 "instId:{}, clientOrderId:{}, orderSysId:{}, orderId:{}, strategyRef:{}, offsetFlag:{}, direction:{}, "
                                 "orderType:{}, orderStatus:{}, volumeTotal:{}, limitPrice:{}, volumeTraded:{}, "
                                 "tradePrice:{}, errorId:{}, originMsg:{}, updateTime:{}, apiSourceEnum:{}",
-                                ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, strategyId,
+                                ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId,
                                 instId, clientOrderId, orderSysId, orderId, strategyRef, OffsetFlagEnum2StrMap[offsetFlag], DirectionEnum2StrMap[direction],
                                 OrderTypeEnum2StrMap[orderType], OrderStatusEnum2StrMap[orderStatus], volumeTotal, limitPrice, volumeTraded, 
                                 tradePrice, errorId, originMsg, updateTime, ApiSourceEnum2StrMap[apiSourceEnum]);
@@ -219,7 +226,8 @@ namespace pubsub {
     struct Balance {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
-        char accountId[ACCOUNTID_SIZE];
+        int accountId;
+        char accountName[ACCOUNTID_SIZE];
         char strategyId[STRATEGYID_SIZE];
 
         char currency[INSTID_SIZE];
@@ -227,14 +235,15 @@ namespace pubsub {
         double available;
         double frozen;
         double borrowed;
+        double unrealizedPnl;
         bool isLast;
         long updateTime;
         ApiSource apiSourceEnum;
 
         std::string getString() {
-            const std::string& s = fmt::format("[Balance] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, strategyId:{}, "
+            const std::string& s = fmt::format("[Balance] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, "
                                 "currency:{}, total:{}, avaiable:{}, frozen:{}, borrowed:{}, isLast:{}, apiSourceEnum:{}",
-                                ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, strategyId,
+                                ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId,
                                 currency, total, available, frozen, borrowed, isLast, ApiSourceEnum2StrMap[apiSourceEnum]);
             return s;
         }
@@ -243,7 +252,8 @@ namespace pubsub {
     struct Position {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
-        char accountId[ACCOUNTID_SIZE];
+        int accountId;
+        char accountName[ACCOUNTID_SIZE];
         char strategyId[STRATEGYID_SIZE];
 
         char instId[INSTID_SIZE];
@@ -260,10 +270,10 @@ namespace pubsub {
         ApiSource apiSourceEnum;
         
         std::string getString() {
-            const std::string& s = fmt::format("[Position] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, strategyId:{}, "
+            const std::string& s = fmt::format("[Position] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, "
                                 "instId:{}, direction:{}, volume:{}, maintMargin:{}, avgPrice:{}, unrealizedPnl:{}, "
                                 "liquidPrice:{}, markPrice:{}, adlQuantile:{}, isLast:{}, apiSourceEnum:{}",
-                                ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, strategyId,
+                                ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId,
                                 instId, DirectionEnum2StrMap[direction], volume, maintMargin, avgPrice, unrealizedPnl, 
                                 liquidPrice, markPrice, adlQuantile, isLast, ApiSourceEnum2StrMap[apiSourceEnum]);
             return s;
@@ -273,7 +283,8 @@ namespace pubsub {
     struct TotalAccount {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
-        char accountId[ACCOUNTID_SIZE];
+        int accountId;
+        char accountName[ACCOUNTID_SIZE];
         char strategyId[STRATEGYID_SIZE];
 
         double totalEquity;
@@ -284,9 +295,9 @@ namespace pubsub {
         ApiSource apiSourceEnum;
 
         std::string getString() {
-            const std::string& s = fmt::format("[TotalAccount] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, strategyId:{}, "
+            const std::string& s = fmt::format("[TotalAccount] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, "
                                 "totalEquity:{}, adjEquity:{}, mmr:{}, mgnRatio:{}, apiSourceEnum:{}",
-                                ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, strategyId,
+                                ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId,
                                 totalEquity, adjEquity, mmr, mgnRatio, ApiSourceEnum2StrMap[apiSourceEnum]);
             return s;
         }
