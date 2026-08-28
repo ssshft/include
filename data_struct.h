@@ -67,7 +67,7 @@ enum InstType {
     BUSD_SWAP,
     C_SWAP,
     USDT_FUTURES,
-    BUSD_FUTURES
+    BUSD_FUTURES,
     C_FUTURES,
     OPTION
 };
