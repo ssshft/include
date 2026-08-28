@@ -63,13 +63,12 @@ enum InstType {
     SPOT,
     MARGIN,
     USDT_SWAP,
-    C_SWAP,
-    BUSD_SWAP,
     USDC_SWAP,
-    BTC_SWAP,
+    BUSD_SWAP,
+    C_SWAP,
     USDT_FUTURES,
+    BUSD_FUTURES
     C_FUTURES,
-    BTC_FUTURES,
     OPTION
 };
 
@@ -78,13 +77,12 @@ static std::unordered_map<InstType, std::string> InstTypeEnum2StrMap {
     {SPOT, "SPOT"},
     {MARGIN, "MARGIN"},
     {USDT_SWAP, "USDT_SWAP"},
-    {C_SWAP, "C_SWAP"},
-    {BUSD_SWAP, "BUSD_SWAP"},
     {USDC_SWAP, "USDC_SWAP"},
-    {BTC_SWAP, "BTC_SWAP"},
+    {BUSD_SWAP, "BUSD_SWAP"},
+    {C_SWAP, "C_SWAP"},
     {USDT_FUTURES, "USDT_FUTURES"},
+    {BUSD_FUTURES, "BUSD_FUTURES"},
     {C_FUTURES, "C_FUTURES"},
-    {BTC_FUTURES, "BTC_FUTURES"},
     {OPTION, "OPTION"}
 };
 
@@ -93,13 +91,12 @@ static std::unordered_map<std::string, InstType> InstTypeStr2EnumMap {
     {"SPOT", SPOT},
     {"MARGIN", MARGIN},
     {"USDT_SWAP", USDT_SWAP},
-    {"C_SWAP", C_SWAP},
-    {"BUSD_SWAP", BUSD_SWAP},
     {"USDC_SWAP", USDC_SWAP},
-    {"BTC_SWAP", BTC_SWAP},
+    {"BUSD_SWAP", BUSD_SWAP},
+    {"C_SWAP", C_SWAP},
     {"USDT_FUTURES", USDT_FUTURES},
+    {"BUSD_FUTURES", BUSD_FUTURES},
     {"C_FUTURES", C_FUTURES},
-    {"BTC_FUTURES", BTC_FUTURES},
     {"OPTION", OPTION}
 };
 
@@ -289,11 +286,11 @@ namespace md {
     struct InstrumentInfo {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
-        char instId[INSTID_SIZE];
-        char originInstId[INSTID_SIZE];
-        char base[INSTID_SIZE];
-        char quote[INSTID_SIZE];
-        char margin[INSTID_SIZE];
+        char instId[32];
+        char originInstId[32];
+        char base[16];
+        char quote[16];
+        char margin[16];
         double value;//合约面值
         double tickSize;//价格精度，比如0.001
         double lotSize;//下单数量精度，比如0.00001
@@ -302,11 +299,12 @@ namespace md {
         double minAmount;//最小下单金额
         double magnifyNumber;//放大倍数
         double reduceNumber;//magnifyNumber倒数
+        int calcType;       // 现货，usdt本位是0， 币本位是1
         int64_t instIdCode; // okx code, sbe行情用到
 
         std::string getString() {
             std::string s = fmt::format("{},{},{},{},{},{},{},"
-                            "{},{},{},{},{},{},{},{},{}",
+                            "{},{},{},{},{},{},{},{},{},{}",
                             ExchangeTypeEnum2StrMap[exchangeTypeEnum],
                             InstTypeEnum2StrMap[instTypeEnum], 
                             instId, 
@@ -322,6 +320,7 @@ namespace md {
                             minAmount,
                             magnifyNumber,
                             reduceNumber,
+                            calcType,
                             instIdCode
                         );
             return s;
@@ -377,7 +376,10 @@ namespace md {
             
             writer.Key("reduceNumber");
             writer.Double(reduceNumber);
-                        
+
+            writer.Key("calcType");
+            writer.Double(calcType);
+
             writer.Key("instIdCode");
             writer.Double(instIdCode);
             
@@ -391,7 +393,7 @@ namespace md {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
         MarketType marketTypeEnum;
-        char instId[INSTID_SIZE];
+        char instId[32];
 
         int64_t tsTrans;
         int64_t tsEvent;
@@ -405,7 +407,7 @@ namespace md {
         double bv1;
         double av1;
 
-        string getString() {
+        std::string getString() {
             std::string s = fmt::format("exchId:{},instType:{},marketType:{},instId:{},tsTrans:{},tsEvent:{},tsRecv:{},tsParse:{},"
                             "bp1:{},ap1:{},bv1:{},av1:{}",
                             ExchangeTypeEnum2StrMap[exchangeTypeEnum],
@@ -439,7 +441,8 @@ namespace md {
         double av3;
         double av4;
         double av5;
-        string getString() {
+
+        std::string getString() {
             std::string s = fmt::format("exchId:{},instType:{},marketType:{},instId:{},tsTrans:{},tsEvent:{},tsRecv:{},tsParse:{},"
                             "bp1:{},ap1:{},bv1:{},av1:{},"
                             "bp2:{},ap2:{},bv2:{},av2:{},"
@@ -487,7 +490,7 @@ namespace md {
         double av9;
         double av10;
 
-        string getString() {
+        std::string getString() {
             std::string s = fmt::format("exchId:{},instType:{},marketType:{},instId:{},tsTrans:{},tsEvent:{},tsRecv:{},tsParse:{},"
                             "bp1:{},ap1:{},bv1:{},av1:{},"
                             "bp2:{},ap2:{},bv2:{},av2:{},"
@@ -563,7 +566,8 @@ namespace md {
         double av18;
         double av19;
         double av20;
-        string getString() {
+
+        std::string getString() {
             std::string s = fmt::format("exchId:{},instType:{},marketType:{},instId:{},tsTrans:{},tsEvent:{},tsRecv:{},tsParse:{},"
                             "bp1:{},ap1:{},bv1:{},av1:{},"
                             "bp2:{},ap2:{},bv2:{},av2:{},"
@@ -622,7 +626,7 @@ namespace md {
         double sz;
         Direction direction;
 
-        string getString() {
+        std::string getString() {
             std::string s = fmt::format("exchId:{},instType:{},marketType:{},instId:{},tsTrans:{},tsEvent:{},tsRecv:{},tsParse:{},"
                             "tradeId:{},px:{},sz:{},direction:{}",
                             ExchangeTypeEnum2StrMap[exchangeTypeEnum],
@@ -641,7 +645,7 @@ namespace md {
         double nextFundingRate;
         int64_t fundingTime;
 
-        string getString() {
+        std::string getString() {
             std::string s = fmt::format("exchId:{},instType:{},marketType:{},instId:{},tsTrans:{},tsEvent:{},tsRecv:{},tsParse:{},"
                             "fundingRate:{},nextFundingRate:{},fundingTime:{}",
                             ExchangeTypeEnum2StrMap[exchangeTypeEnum],
@@ -689,8 +693,8 @@ namespace md {
         MarketType marketTypeEnum;
         char instId[INSTID_SIZE];
 
-        string getString() {
-            string ret{""};
+        std::string getString() {
+            std::string ret{""};
             ret.append("Header:exchId")
                 .append(ExchangeTypeEnum2StrMap[exchangeTypeEnum]).append(",instType:")
                 .append(InstTypeEnum2StrMap[instTypeEnum]).append(",marketType:")
@@ -713,7 +717,7 @@ namespace md {
         };
         MarketDataBody body;
 
-        string getString(){
+        std::string getString(){
             string ret{""};
             if(header.marketTypeEnum == DEPTH1){
                 ret.append(body.depth1.getString());

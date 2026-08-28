@@ -65,13 +65,13 @@ namespace pubsub {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
         int accountId;
-        char accountName[ACCOUNTID_SIZE];
-        char strategyId[STRATEGYID_SIZE];
+        char accountName[32];
+        char strategyId[32];
 
-        char instId[INSTID_SIZE];
-        long clientOrderId;
-        char orderSysId[ORDER_SIZE];
-        char strategyRef[ORDER_SIZE];
+        char instId[32];
+        int64_t clientOrderId;
+        char orderSysId[64];
+        char strategyRef[64];
         OffsetFlag offsetFlag;
         Direction direction;
         OrderType orderType;
@@ -95,13 +95,13 @@ namespace pubsub {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
         int accountId;
-        char accountName[ACCOUNTID_SIZE];
-        char strategyId[STRATEGYID_SIZE];
+        char accountName[32];
+        char strategyId[32];
 
-        char instId[INSTID_SIZE];
-        long clientOrderId;
-        char orderSysId[ORDER_SIZE];
-        char orderId[ORDER_SIZE];
+        char instId[32];
+        int64_t clientOrderId;
+        char orderSysId[64];
+        char orderId[64];
 
         std::string getString() {
             const std::string s = fmt::format("[CancelOrder] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, "
@@ -116,13 +116,13 @@ namespace pubsub {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
         int accountId;
-        char accountName[ACCOUNTID_SIZE];
-        char strategyId[STRATEGYID_SIZE];
+        char accountName[32];
+        char strategyId[32];
 
-        char instId[INSTID_SIZE];
-        long clientOrderId;
-        char orderSysId[ORDER_SIZE];
-        char orderId[ORDER_SIZE];
+        char instId[32];
+        int64_t clientOrderId;
+        char orderSysId[64];
+        char orderId[64];
 
         std::string getString() {
             const std::string s = fmt::format("[QueryOrder] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, "
@@ -137,8 +137,8 @@ namespace pubsub {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
         int accountId;
-        char accountName[ACCOUNTID_SIZE];
-        char strategyId[STRATEGYID_SIZE];
+        char accountName[32];
+        char strategyId[32];
 
         std::string getString() {
             const std::string s = fmt::format("[QueryAccount] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}",
@@ -151,10 +151,10 @@ namespace pubsub {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
         int accountId;
-        char accountName[ACCOUNTID_SIZE];
-        char strategyId[STRATEGYID_SIZE];
+        char accountName[32];
+        char strategyId[32];
 
-        char currency[INSTID_SIZE];
+        char currency[16];
 
         std::string getString() {
             const std::string s = fmt::format("[QueryAccount] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, currency:{}",
@@ -167,10 +167,10 @@ namespace pubsub {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
         int accountId;
-        char accountName[ACCOUNTID_SIZE];
-        char strategyId[STRATEGYID_SIZE];
+        char accountName[32];
+        char strategyId[32];
 
-        char instId[INSTID_SIZE];
+        char instId[32];
 
         std::string getString() {
             const std::string s = fmt::format("[QueryPosition] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, instId:{}",
@@ -183,14 +183,14 @@ namespace pubsub {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
         int accountId;
-        char accountName[ACCOUNTID_SIZE];
-        char strategyId[STRATEGYID_SIZE];
+        char accountName[32];
+        char strategyId[32];
 
-        char instId[INSTID_SIZE];
-        long clientOrderId;
-        char orderSysId[ORDER_SIZE];
-        char orderId[ORDER_SIZE];
-        char strategyRef[ORDER_SIZE];
+        char instId[32];
+        int64_t clientOrderId;
+        char orderSysId[64];
+        char orderId[64];
+        char strategyRef[64];
 
         OffsetFlag offsetFlag;
         Direction direction;
@@ -205,8 +205,8 @@ namespace pubsub {
         bool reduceOnly;
 
         int errorId;
-        char originMsg[ORIGINMSG_SIZE];
-        long updateTime;
+        char originMsg[128];
+        int64_t updateTime;
 
         ApiSource apiSourceEnum;
         
@@ -227,17 +227,17 @@ namespace pubsub {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
         int accountId;
-        char accountName[ACCOUNTID_SIZE];
-        char strategyId[STRATEGYID_SIZE];
+        char accountName[32];
+        char strategyId[32];
 
-        char currency[INSTID_SIZE];
+        char currency[16];
         double total;
         double available;
         double frozen;
         double borrowed;
         double unrealizedPnl;
         bool isLast;
-        long updateTime;
+        int64_t updateTime;
         ApiSource apiSourceEnum;
 
         std::string getString() {
@@ -253,10 +253,10 @@ namespace pubsub {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
         int accountId;
-        char accountName[ACCOUNTID_SIZE];
-        char strategyId[STRATEGYID_SIZE];
+        char accountName[32];
+        char strategyId[32];
 
-        char instId[INSTID_SIZE];
+        char instId[32];
         Direction direction;
         double volume;
         double maintMargin;
@@ -266,7 +266,7 @@ namespace pubsub {
         double markPrice;
         double adlQuantile;
         bool isLast;
-        long updateTime;
+        int64_t updateTime;
         ApiSource apiSourceEnum;
         
         std::string getString() {
@@ -284,14 +284,14 @@ namespace pubsub {
         ExchangeType exchangeTypeEnum;
         InstType instTypeEnum;
         int accountId;
-        char accountName[ACCOUNTID_SIZE];
-        char strategyId[STRATEGYID_SIZE];
+        char accountName[32];
+        char strategyId[32];
 
         double totalEquity;
         double adjEquity;
         double mmr;
         double mgnRatio;
-        long updateTime;
+        int64_t updateTime;
         ApiSource apiSourceEnum;
 
         std::string getString() {
@@ -356,7 +356,7 @@ namespace pubsub {
         CommandBody  body;
         
         std::string getString() {
-            string ret = fmt::format("[{}]", CommandTypeEnum2StrMap[cmdTypeEnum]);
+            std::string ret = fmt::format("[{}]", CommandTypeEnum2StrMap[cmdTypeEnum]);
             if (cmdTypeEnum == CMD_RPT_ORDER_RESPONSE || cmdTypeEnum == CMD_RPT_NEW_ORDER || cmdTypeEnum == CMD_RPT_CANCEL_ORDER || cmdTypeEnum == CMD_RPT_QUERY_ORDER) {
                 ret.append(body.orderResponse.getString());
             }

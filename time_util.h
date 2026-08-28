@@ -109,7 +109,7 @@ namespace crypto {
         return (ts.tv_sec + atomic_rdtscp_count++) * 1000000000LL + ts.tv_nsec;
     }
    
-    inline unsigned int64_t rdtsc() {
+    inline  uint64_t rdtsc() {
         return __builtin_ia32_rdtsc();
     }
 
