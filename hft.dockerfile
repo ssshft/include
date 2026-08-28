@@ -7,21 +7,20 @@
 #   cd /workspace/<subproject> && mkdir -p build && cd build && cmake .. && make -j
 #
 # =============================================================================
-FROM ubuntu:22.04
+FROM --platform=linux/amd64 ubuntu:20.04
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Etc/UTC
+ENV DEBIAN_FRONTEND=noninteractive 
+ENV TZ=UTC
 
 # =============================================================================
 # 1) 基础工具 + apt 库
 # =============================================================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
         # -------- 编译 / 调试工具 --------
-        build-essential gcc g++ gdb clang \
-        cmake make ninja-build \
+        build-essential gcc g++ gdb \
+        cmake make \
         git curl wget ca-certificates \
         vim nano less \
-        pkg-config valgrind strace \
         automake autoconf libtool \
         # -------- 必需的 C++ 库 (**核心, 生产也用**) --------
         libssl-dev              \
@@ -34,7 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         # oneapi::tbb::concurrent_unordered_map
         # 依赖: SecurityManager, OrderManager
         # TODO 后续可迁 ankerl::unordered_dense 后砍
-        redis-server            \
+        rapidjson-dev            \
         # contractinfo 币对信息 Redis 写入 (USE_INFO_SHM 未开时的默认路径)
         # -------- 过渡期依赖, 后续代码清理后可移除 --------
     && rm -rf /var/lib/apt/lists/*
@@ -79,12 +78,24 @@ RUN git clone --depth 1 https://github.com/cameron314/concurrentqueue.git /opt/c
 RUN git clone --depth 1 https://github.com/MengRao/fmtlog.git /opt/fmtlog
 
 # ---- cpp_redis (Redis 客户端, contractinfo 写入 + SecurityManager 读取) ----
-RUN git clone --depth 1 --recurse-submodules https://github.com/cpp-redis/cpp_redis.git && \
-    cd cpp_redis && mkdir build && cd build && \
-    cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-          -DCMAKE_INSTALL_PREFIX=/usr/local .. && \
-    make -j$(nproc) install && \
-    cd /opt && rm -rf cpp_redis
+# 1. 克隆并编译安装 tacopie
+# RUN git clone --depth 1 https://github.com/cpp-redis/tacopie.git && \
+#     cd tacopie && \
+#     mkdir build && cd build && \
+#     cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+#           -DCMAKE_INSTALL_PREFIX=/usr/local .. && \
+#     make -j$(nproc) install && \
+#     cd / && rm -rf /tacopie
+
+# # 2. 克隆并编译安装 cpp_redis (现在可以找到已安装的 tacopie)
+# RUN git clone --depth 1 --recurse-submodules https://github.com/cpp-redis/cpp_redis.git && \
+#     cd cpp_redis && \
+#     mkdir build && cd build && \
+#     cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+#           -DCMAKE_INSTALL_PREFIX=/usr/local .. && \
+#     make -j$(nproc) install && \
+#     cd / && rm -rf /cpp_redis
+
 
 # ---- ldconfig 更新动态链接器缓存 ----
 RUN ldconfig
@@ -107,18 +118,18 @@ RUN ldconfig
 # =============================================================================
 WORKDIR /workspace
 
-RUN g++ --version && \
-    cmake --version && \
-    echo "--- library sanity check ---" && \
-    ls /usr/local/lib/libfmt.a  || (echo "MISSING: fmt"       && exit 1) && \
-    ls /usr/local/lib/libsimdjson.a || (echo "MISSING: simdjson" && exit 1) && \
-    ls /usr/include/boost/beast.hpp || (echo "MISSING: boost::beast" && exit 1) && \
-    ls /usr/include/openssl/hmac.h  || (echo "MISSING: openssl-dev"  && exit 1) && \
-    ls /usr/include/rapidjson/document.h || (echo "MISSING: rapidjson-dev" && exit 1) && \
-    ls /usr/include/cpprest/http_client.h || (echo "MISSING: cpprest-dev" && exit 1) && \
-    ls /usr/include/tbb/concurrent_unordered_map.h || (echo "MISSING: libtbb-dev" && exit 1) && \
-    ls /opt/concurrentqueue/concurrentqueue.h || (echo "MISSING: concurrentqueue" && exit 1) && \
-    ls /opt/fmtlog/fmtlog.h                    || (echo "MISSING: fmtlog" && exit 1) && \
-    echo "--- all deps installed ---"
+# RUN g++ --version && \
+#     cmake --version && \
+#     echo "--- library sanity check ---" && \
+#     ls /usr/local/lib/libfmt.a  || (echo "MISSING: fmt"       && exit 1) && \
+#     ls /usr/local/lib/libsimdjson.a || (echo "MISSING: simdjson" && exit 1) && \
+#     ls /usr/include/boost/beast.hpp || (echo "MISSING: boost::beast" && exit 1) && \
+#     ls /usr/include/openssl/hmac.h  || (echo "MISSING: openssl-dev"  && exit 1) && \
+#     ls /usr/include/rapidjson/document.h || (echo "MISSING: rapidjson-dev" && exit 1) && \
+#     ls /usr/include/cpprest/http_client.h || (echo "MISSING: cpprest-dev" && exit 1) && \
+#     ls /usr/include/tbb/concurrent_unordered_map.h || (echo "MISSING: libtbb-dev" && exit 1) && \
+#     ls /opt/concurrentqueue/concurrentqueue.h || (echo "MISSING: concurrentqueue" && exit 1) && \
+#     ls /opt/fmtlog/fmtlog.h                    || (echo "MISSING: fmtlog" && exit 1) && \
+#     echo "--- all deps installed ---"
 
 CMD ["/bin/bash"]

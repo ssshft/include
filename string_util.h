@@ -320,8 +320,8 @@ namespace crypto{
         return val;
     }
 
-    inline long fast_atol(std::string_view sv) {
-        long val = 0;
+    inline int64_t fast_atol(std::string_view sv) {
+        int64_t val = 0;
         auto res = std::from_chars(sv.data(), sv.data() + sv.size(), val);
         if (res.ec != std::errc()) {
             return NAN;
