@@ -277,6 +277,21 @@ namespace crypto{
         return crypto::hmacSha256Hex(apiSecret, s);
     }
 
+    inline std::string host_of(const std::string& url) {
+        std::string h = url;
+        auto p = h.find("://");
+        if (p != std::string::npos) {
+            h = h.substr(p + 3);
+        }
+
+        auto q = h.find('/');
+        if (q != std::string::npos) {
+            h = h.substr(0, q);
+        }
+
+        return h;
+    }
+
     inline double str2double(const std::string& s) {
         double d;
         std::stringstream ss;
