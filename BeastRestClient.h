@@ -303,9 +303,10 @@ namespace net {
 
             // ---- 4. 收集成功建连的 idle 索引 ----
             auto init_now = std::chrono::steady_clock::now();
+            const auto stagger = std::chrono::milliseconds(cfg_.idle_close_after_ms > 0 ? cfg_.idle_close_after_ms / std::max<size_t>(1, cfg_.max_connections) : 0);
             for (size_t i = 0; i < connections_.size(); ++i) {
                 if (!connections_[i]->dead) {
-                    connections_[i]->last_release_time = init_now;
+                    connections_[i]->last_release_time = init_now - stagger * i;
                     idle_indices_.push(i);
                 }
             }
@@ -629,6 +630,10 @@ namespace net {
         void close_stale_idle_connection(std::chrono::steady_clock::time_point now) {
             auto max_idle = std::chrono::milliseconds(cfg_.idle_close_after_ms);
             size_t n = idle_indices_.size();
+
+            // 本秒最多关 1 条: 即使所有 conn 同相老化, 也不会一次掏空 idle 池,
+            // 保证 max_connections>=1 时永远至少有一条可用 (除非它也是 dead)。
+            size_t closed = 0;
             for (size_t i = 0; i < n; ++i) {
                 size_t idx = idle_indices_.pop_front();
                 Connection* conn = connections_[idx].get();
@@ -638,10 +643,11 @@ namespace net {
                 }
 
                 auto age = now - conn->last_release_time;
-                if (age > max_idle) {
+                if (closed == 0 && age > max_idle) {
                     conn->dead = true;
                     idle_count_atomic_.fetch_sub(1, std::memory_order_relaxed);
                     start_reconnect(idx);
+                    ++closed;
                 }
                 else {
                     idle_indices_.push(idx); // 未过期原样回 tail (保持FIFO)

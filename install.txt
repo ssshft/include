@@ -1,25 +1,40 @@
-apt-get install openssl-devel
-apt-get install openssl
+// new install
 apt install libboost-all-dev
-apt install libcpprest-dev
+apt install rapidjson-dev
+git clone https://github.com/fmtlib/fmt.git
+mkdir build && cd build && make -j1 && make install
+
+apt install gcc-11 g++-11
+update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
+update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 90 --slave /usr/bin/g++ g++ /usr/bin/g++-9
+update-alternatives --config gcc
+
+git clone https://github.com/cpp-redis/cpp_redis.git
+cd cpp_redis
+git submodule init && git submodule update
+cd tacopid && mkdir build && cd build && make -j1 && make install
+cd cpp_redis && mkdir build && cd build && make -j1 && make install
+
+git clone https://github.com/oneapi-src/oneTBB.git
+mkdir build && cd build && make -j1 && make install
+
 apt install libtbb-dev
 
+git clone https://github.com/simdjson/simdjson.git
+mkdir build && cd build && make -j1 && make install
 
+git clone https://github.com/MengRao/fmtlog.git
+mkdir /usr/local/include/fmtlog
+cd fmtlog && cp fmtlog* /usr/local/include/fmtlog/
 
-apt install sqlite3 libsqlite3-dev
-apt install libnanomsg-dev
-apt install rapidjson-dev
-apt install redis-server
-apt install mysql-server
+git clone https://github.com/cameron314/concurrentqueue.git
+mkdir /usr/local/include/concurrentqueue
+cd concurrentqueue && cp *.h /usr/local/include/concurrentqueue/
+
 apt install libmysql++-dev 
 
-git clone https://github.com/fmtlib/fmt.git
-git clone https://github.com/cpp-redis/cpp_redis.git
-git clone https://github.com/MengRao/fmtlog.git
-git clone https://github.com/SqliteModernCpp/sqlite_modern_cpp.git
-git clone https://github.com/MengRao/NanoLogLite.git
-git clone https://github.com/cameron314/concurrentqueue.git
-git clone https://github.com/zeromq/libzmq.git
-git clone https://github.com/zeromq/cppzmq.git
-git clone https://github.com/libuv/libuv.git
-git clone https://github.com/simdjson/simdjson.git
+apt-get install openssl-devel
+apt-get install openssl
+
+apt install redis-server
+apt install mysql-server
