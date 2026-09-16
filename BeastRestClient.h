@@ -732,7 +732,7 @@ namespace net {
                             std::chrono::steady_clock::time_point start)
         {
             // ★ reset parser 后必须重设 body_limit (赋值 {} 会把 limit 打回默认 1MB)
-            conn->response_parser = {};
+            conn->response_parser.reset();
             conn->response_parser.body_limit(cfg_.max_response_body_bytes);
             conn->buffer.consume(conn->buffer.size());
 
@@ -823,7 +823,7 @@ namespace net {
             conn->stream = std::make_unique<Connection::StreamType>(ioc_, ssl_ctx_);
             conn->buffer.consume(conn->buffer.size());
             
-            conn->response_parser = {};                              // ★
+            conn->response_parser.reset();                              // ★
             conn->response_parser.body_limit(cfg_.max_response_body_bytes);   // ★ 必须重设
 
             conn->http_req = {};
