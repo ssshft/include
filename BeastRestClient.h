@@ -156,6 +156,10 @@ namespace net {
         // binance/okx/bybit/gateio 服务端keep-alive ~30s，建议设置25s
         // 0 = 关闭
         int idle_close_after_ms = 0;
+
+        // ★ 新增: 响应体最大字节数 (默认 1MB)。
+        // 超过此值 → async_read 回调返回 body_limit 错误。
+        uint64_t    max_response_body_bytes = 1ull * 1024 * 1024;
     };
 
     // ========================================================================
@@ -295,7 +299,9 @@ namespace net {
             // ---- 2. 预创建 Connection 对象 (不握手, 只构造) ----
             connections_.reserve(cfg_.max_connections);
             for (size_t i = 0; i < cfg_.max_connections; ++i) {
-                connections_.push_back(std::make_unique<Connection>(ioc_, ssl_ctx_));
+                // connections_.push_back(std::make_unique<Connection>(ioc_, ssl_ctx_));
+
+                connections_.push_back(std::make_unique<Connection>(ioc_, ssl_ctx_, cfg_.max_response_body_bytes));  
             }
 
             // ---- 3. 并行 establish (N 个临时线程同时握手) ----
@@ -434,7 +440,7 @@ namespace net {
             using StreamType = beast::ssl_stream<beast::tcp_stream>;
             std::unique_ptr<StreamType>       stream;
             beast::flat_buffer                buffer;
-            http::response<http::string_body> response;
+            http::response_parser<http::string_body> response_parser; 
             // 内联 http_req 复用, 无 per-req 分配
             http::request<http::string_body>  http_req;
             bool dead = false;
@@ -446,8 +452,10 @@ namespace net {
             // 只在woker线程读写，无需atomic
             std::chrono::steady_clock::time_point last_release_time;
 
-            Connection(asio::io_context& ioc, ssl::context& ctx)
-                : stream(std::make_unique<StreamType>(ioc, ctx)) {}
+            Connection(asio::io_context& ioc, ssl::context& ctx, uint64_t body_limit)
+                : stream(std::make_unique<StreamType>(ioc, ctx)) {
+                response_parser.body_limit(body_limit);
+            }
 
             // 用预 resolve 的 endpoints, 不再 DNS lookup
             bool establish(const tcp::resolver::results_type& eps,
@@ -723,23 +731,25 @@ namespace net {
         void read_response(Connection* conn, Request* req, size_t conn_idx,
                             std::chrono::steady_clock::time_point start)
         {
-            // 关键:每次 read 前重置 response 和 buffer
-            conn->response = {};
+            // ★ reset parser 后必须重设 body_limit (赋值 {} 会把 limit 打回默认 1MB)
+            conn->response_parser = {};
+            conn->response_parser.body_limit(cfg_.max_response_body_bytes);
             conn->buffer.consume(conn->buffer.size());
 
-            http::async_read(*conn->stream, conn->buffer, conn->response,
+            http::async_read(*conn->stream, conn->buffer, conn->response_parser,   // ★ parser
                 [this, conn, req, conn_idx, start]
                 (beast::error_code ec, size_t /*n*/) mutable {
                     HttpResponse resp;
                     resp.rtt_ns = elapsed_ns(start);
+                    auto& response = conn->response_parser.get();      // ★ 取 response
 
                     if (ec) {
                         // read 失败时也尽量回填**已接收的** status_code 和 (可能部分的) body,
                         // 例如服务器已经发回 4xx + body 但 TCP 中途断, 或 timeout 但 header 已到。
                         // 上层可以据此做诊断 / 区分"网络出错"和"业务被拒"。
                         // (没收到任何数据时, result_int()==0, body()=="", 等价于留空)
-                        resp.status_code = static_cast<int>(conn->response.result_int());
-                        resp.body        = std::move(conn->response.body());
+                        resp.status_code = static_cast<int>(response.result_int());
+                        resp.body        = std::move(response.body());
                         req->callback(ec, std::move(resp));
                         req_pool_.free_from_worker(req);
                         release_connection(conn_idx, /*alive=*/false);
@@ -747,9 +757,9 @@ namespace net {
                         return;
                     }
 
-                    resp.status_code = static_cast<int>(conn->response.result_int());
-                    resp.body        = std::move(conn->response.body());
-                    bool alive = !conn->response.need_eof();
+                    resp.status_code = static_cast<int>(response.result_int());
+                    resp.body        = std::move(response.body());
+                    bool alive = !response.need_eof();
 
                     req->callback(ec, std::move(resp));
                     req_pool_.free_from_worker(req);
@@ -812,8 +822,12 @@ namespace net {
             conn->close();   // 关旧 fd / cancel pending
             conn->stream = std::make_unique<Connection::StreamType>(ioc_, ssl_ctx_);
             conn->buffer.consume(conn->buffer.size());
-            conn->response = {};
+            
+            conn->response_parser = {};                              // ★
+            conn->response_parser.body_limit(cfg_.max_response_body_bytes);   // ★ 必须重设
+
             conn->http_req = {};
+
 
             // reconnect 期间不要让 request_timeout 误伤 (handshake 可能慢)
             beast::get_lowest_layer(*conn->stream).expires_never();
