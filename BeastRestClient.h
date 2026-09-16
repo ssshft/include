@@ -157,9 +157,9 @@ namespace net {
         // 0 = 关闭
         int idle_close_after_ms = 0;
 
-        // ★ 新增: 响应体最大字节数 (默认 1MB)。
+        // ★ 新增: 响应体最大字节数 (默认 8MB)。
         // 超过此值 → async_read 回调返回 body_limit 错误。
-        uint64_t    max_response_body_bytes = 1ull * 1024 * 1024;
+        uint64_t    max_response_body_bytes = 8ull * 1024 * 1024;
     };
 
     // ========================================================================
@@ -299,8 +299,6 @@ namespace net {
             // ---- 2. 预创建 Connection 对象 (不握手, 只构造) ----
             connections_.reserve(cfg_.max_connections);
             for (size_t i = 0; i < cfg_.max_connections; ++i) {
-                // connections_.push_back(std::make_unique<Connection>(ioc_, ssl_ctx_));
-
                 connections_.push_back(std::make_unique<Connection>(ioc_, ssl_ctx_, cfg_.max_response_body_bytes));  
             }
 
@@ -438,9 +436,11 @@ namespace net {
 
         struct Connection {
             using StreamType = beast::ssl_stream<beast::tcp_stream>;
+            using ResponseParser = http::response_parser<http::string_body>;
+
             std::unique_ptr<StreamType>       stream;
             beast::flat_buffer                buffer;
-            http::response_parser<http::string_body> response_parser; 
+            std::optional<ResponseParser> response_parser;
             // 内联 http_req 复用, 无 per-req 分配
             http::request<http::string_body>  http_req;
             bool dead = false;
@@ -454,7 +454,13 @@ namespace net {
 
             Connection(asio::io_context& ioc, ssl::context& ctx, uint64_t body_limit)
                 : stream(std::make_unique<StreamType>(ioc, ctx)) {
+                response_parser.emplace();
                 response_parser.body_limit(body_limit);
+            }
+
+            void reset_response(uint64_t body_limit) {
+                response_parser.emplace();                    // 析构旧值 + 就地重构造
+                response_parser->body_limit(body_limit);
             }
 
             // 用预 resolve 的 endpoints, 不再 DNS lookup
@@ -732,16 +738,15 @@ namespace net {
                             std::chrono::steady_clock::time_point start)
         {
             // ★ reset parser 后必须重设 body_limit (赋值 {} 会把 limit 打回默认 1MB)
-            conn->response_parser.reset();
-            conn->response_parser.body_limit(cfg_.max_response_body_bytes);
+            conn->reset_response(cfg_.max_response_body_bytes);
             conn->buffer.consume(conn->buffer.size());
 
-            http::async_read(*conn->stream, conn->buffer, conn->response_parser,   // ★ parser
+            http::async_read(*conn->stream, conn->buffer, *conn->response_parser,   // ★ parser
                 [this, conn, req, conn_idx, start]
                 (beast::error_code ec, size_t /*n*/) mutable {
                     HttpResponse resp;
                     resp.rtt_ns = elapsed_ns(start);
-                    auto& response = conn->response_parser.get();      // ★ 取 response
+                    auto& response = conn->response_parser->get();      // ★ 取 response
 
                     if (ec) {
                         // read 失败时也尽量回填**已接收的** status_code 和 (可能部分的) body,
@@ -822,12 +827,8 @@ namespace net {
             conn->close();   // 关旧 fd / cancel pending
             conn->stream = std::make_unique<Connection::StreamType>(ioc_, ssl_ctx_);
             conn->buffer.consume(conn->buffer.size());
-            
-            conn->response_parser.reset();                              // ★
-            conn->response_parser.body_limit(cfg_.max_response_body_bytes);   // ★ 必须重设
-
+            conn->reset_response(cfg_.max_response_body_bytes);
             conn->http_req = {};
-
 
             // reconnect 期间不要让 request_timeout 误伤 (handshake 可能慢)
             beast::get_lowest_layer(*conn->stream).expires_never();
