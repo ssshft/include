@@ -455,7 +455,7 @@ namespace net {
             Connection(asio::io_context& ioc, ssl::context& ctx, uint64_t body_limit)
                 : stream(std::make_unique<StreamType>(ioc, ctx)) {
                 response_parser.emplace();
-                response_parser.body_limit(body_limit);
+                response_parser->body_limit(body_limit);
             }
 
             void reset_response(uint64_t body_limit) {
