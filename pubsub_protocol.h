@@ -79,7 +79,7 @@ namespace pubsub {
         double limitPrice;
         bool reduceOnly;
 
-        std::string getString() {
+        std::string getString() const {
             const std::string s = fmt::format("[NewOrder] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, "
                             "instId:{}, clientOrderId:{}, orderSysId:{}, strategyRef:{}, offsetFlag:{}, "
                             "direction:{}, orderType:{}, volumeTotal:{}, limitPrice:{}, reduceOnly:{}",
@@ -103,7 +103,7 @@ namespace pubsub {
         char orderSysId[64];
         char orderId[64];
 
-        std::string getString() {
+        std::string getString() const {
             const std::string s = fmt::format("[CancelOrder] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, "
                             "instId:{}, clientOrderId:{}, orderSysId:{}, orderId:{}",
                             ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId,
@@ -124,7 +124,7 @@ namespace pubsub {
         char orderSysId[64];
         char orderId[64];
 
-        std::string getString() {
+        std::string getString() const {
             const std::string s = fmt::format("[QueryOrder] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, "
                             "instId:{}, clientOrderId:{}, orderSysId:{}, orderId:{}",
                             ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId,
@@ -140,7 +140,7 @@ namespace pubsub {
         char accountName[32];
         char strategyId[32];
 
-        std::string getString() {
+        std::string getString() const {
             const std::string s = fmt::format("[QueryAccount] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}",
                             ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId);
             return s;     
@@ -156,7 +156,7 @@ namespace pubsub {
 
         char currency[16];
 
-        std::string getString() {
+        std::string getString() const {
             const std::string s = fmt::format("[QueryAccount] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, currency:{}",
                             ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId, currency);
             return s;     
@@ -172,7 +172,7 @@ namespace pubsub {
 
         char instId[32];
 
-        std::string getString() {
+        std::string getString() const {
             const std::string s = fmt::format("[QueryPosition] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, instId:{}",
                             ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId, instId);
             return s;     
@@ -210,7 +210,7 @@ namespace pubsub {
 
         ApiSource apiSourceEnum;
         
-        std::string getString() {
+        std::string getString() const {
             const std::string& s = fmt::format("[OrderResponse] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, "
                                 "instId:{}, clientOrderId:{}, orderSysId:{}, orderId:{}, strategyRef:{}, offsetFlag:{}, direction:{}, "
                                 "orderType:{}, orderStatus:{}, volumeTotal:{}, limitPrice:{}, volumeTraded:{}, "
@@ -240,7 +240,7 @@ namespace pubsub {
         int64_t updateTime;
         ApiSource apiSourceEnum;
 
-        std::string getString() {
+        std::string getString() const {
             const std::string& s = fmt::format("[Balance] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, "
                                 "currency:{}, total:{}, avaiable:{}, frozen:{}, borrowed:{}, isLast:{}, apiSourceEnum:{}",
                                 ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId,
@@ -269,7 +269,7 @@ namespace pubsub {
         int64_t updateTime;
         ApiSource apiSourceEnum;
         
-        std::string getString() {
+        std::string getString() const {
             const std::string& s = fmt::format("[Position] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, "
                                 "instId:{}, direction:{}, volume:{}, maintMargin:{}, avgPrice:{}, unrealizedPnl:{}, "
                                 "liquidPrice:{}, markPrice:{}, adlQuantile:{}, isLast:{}, apiSourceEnum:{}",
@@ -294,7 +294,7 @@ namespace pubsub {
         int64_t updateTime;
         ApiSource apiSourceEnum;
 
-        std::string getString() {
+        std::string getString() const {
             const std::string& s = fmt::format("[TotalAccount] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, "
                                 "totalEquity:{}, adjEquity:{}, mmr:{}, mgnRatio:{}, apiSourceEnum:{}",
                                 ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId,
@@ -316,7 +316,7 @@ namespace pubsub {
         };
         CommandBody body;
 
-        std::string getString() {
+        std::string getString() const {
             std::string ret = fmt::format("[{}]", CommandTypeEnum2StrMap[cmdTypeEnum]);
             if (cmdTypeEnum == CMD_NEW_ORDER) {
                 ret.append(body.newOrder.getString());
@@ -355,7 +355,7 @@ namespace pubsub {
         };
         CommandBody  body;
         
-        std::string getString() {
+        std::string getString() const {
             std::string ret = fmt::format("[{}]", CommandTypeEnum2StrMap[cmdTypeEnum]);
             if (cmdTypeEnum == CMD_RPT_ORDER_RESPONSE || cmdTypeEnum == CMD_RPT_NEW_ORDER || cmdTypeEnum == CMD_RPT_CANCEL_ORDER || cmdTypeEnum == CMD_RPT_QUERY_ORDER) {
                 ret.append(body.orderResponse.getString());
