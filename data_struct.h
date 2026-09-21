@@ -309,8 +309,9 @@ namespace md {
         int64_t instIdCode; // okx code, sbe行情用到
 
         std::string getString() {
-            std::string s = fmt::format("{},{},{},{},{},{},{},"
-                            "{},{},{},{},{},{},{},{},{},{}",
+            std::string s = fmt::format("exchId:{},instType:{},instId:{},originInstId:{},base:{},quote:{},margin:{},"
+                            "value:{},tickSize:{},lotSize:{},priceDigits:{},sizeDigits:{},pricePow10:{},sizePow10:{},tickSizeInt:{},lotSizeInt:{},"
+                            "minSize:{},maxSize:{},minAmount:{},magnifyNumber:{},reduceNumber:{},calcType:{},instIdCode:{}",
                             ExchangeTypeEnum2StrMap[exchangeTypeEnum],
                             InstTypeEnum2StrMap[instTypeEnum], 
                             instId, 
@@ -321,6 +322,12 @@ namespace md {
                             value,
                             tickSize,
                             lotSize,
+                            priceDigits,
+                            sizeDigits,
+                            pricePow10,
+                            sizePow10,
+                            tickSizeInt,
+                            lotSizeInt,
                             minSize,
                             maxSize,
                             minAmount,
