@@ -294,6 +294,12 @@ namespace md {
         double value;//合约面值
         double tickSize;//价格精度，比如0.001
         double lotSize;//下单数量精度，比如0.00001
+        int priceDigits;   // 价格小数位数（去尾零后），如 0.05→2, 0.25→2, 1→0
+        int sizeDigits;   // 数量小数位数（去尾零后）
+        int64_t pricePow10;   // 10^priceDigits，用于把价格放大成整数
+        int64_t sizePow10;   // 10^sizeDigits， 用于把数量放大成整数
+        int64_t tickSizeInt;   // tickSize × pricePow10，价格最小单位的整数表示
+        int64_t lotSizeInt;   // lotSize  × sizePow10， 数量最小单位的整数表示
         double minSize;//下单最小数量
         double maxSize;//最大下单数量
         double minAmount;//最小下单金额
