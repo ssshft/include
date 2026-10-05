@@ -141,7 +141,7 @@ struct alignas(64) OmsShmHeader {
     std::atomic<uint64_t> total_stale_live_reclaims;  // v2 新增: 卡单强制回收次数
 
     // 填充到 4 KB, 剩余保留将来扩展
-    char pad[4096 - 96];
+    char pad[4096 - 112];
 };
 static_assert(sizeof(OmsShmHeader) == 4096, "OmsShmHeader must be 4 KB");
 
@@ -195,6 +195,43 @@ static_assert(sizeof(OmsSlot) == kSlotSize,
     "OmsSlot size drift; if pubsub::RCommand grew, bump kSlotSize");
 static_assert(std::atomic<uint64_t>::is_always_lock_free, "atomic<u64> must be lock-free for shm");
 static_assert(std::atomic<uint32_t>::is_always_lock_free, "atomic<u32> must be lock-free for shm");
+
+
+// =============================================================================
+// 内部工具: 索引 open-addressing 探测
+//   查找: 返回 bucket 索引 (命中); found=false 时返回可插入的空/tombstone bucket
+// =============================================================================
+inline uint32_t index_probe_find(IndexEntry* idx_arr, uint32_t cap,
+                                 uint64_t hash, std::string_view key,
+                                 bool& found_out) noexcept
+{
+    found_out = false;
+    uint32_t mask = cap - 1;
+    uint32_t first_slot = UINT32_MAX;   // 记录第一个可 reuse (empty/tombstone) 的 bucket
+    for (uint32_t i = 0; i < kMaxProbeIndex; ++i) {
+        uint32_t b = static_cast<uint32_t>((hash + i) & mask);
+        IndexEntry& e = idx_arr[b];
+        uint64_t h = e.key_hash.load(std::memory_order_acquire);
+        if (h == kHashEmpty) {
+            if (first_slot == UINT32_MAX) first_slot = b;
+            return first_slot;   // probe 遇空即停 (查找失败, 但返回可插入位置)
+        }
+        if (h == kHashTombstone) {
+            if (first_slot == UINT32_MAX) first_slot = b;
+            continue;   // 跳过 tombstone 继续查
+        }
+        if (h == hash) {
+            // 验证 key 前缀
+            size_t cmp_n = key.size() < 16 ? key.size() : 16;
+            if (std::memcmp(e.key_prefix, key.data(), cmp_n) == 0) {
+                found_out = true;
+                return b;
+            }
+        }
+    }
+    return first_slot;   // 探测满仍未找到, 返回可插入位置 (可能是 UINT32_MAX 表示全占)
+}
+
 
 // =============================================================================
 // SHM 内存布局辅助
@@ -545,41 +582,6 @@ protected:
     bool            created_new_ = false;
     OmsShmLayout    layout_;
 };
-
-// =============================================================================
-// 内部工具: 索引 open-addressing 探测
-//   查找: 返回 bucket 索引 (命中); found=false 时返回可插入的空/tombstone bucket
-// =============================================================================
-inline uint32_t index_probe_find(IndexEntry* idx_arr, uint32_t cap,
-                                 uint64_t hash, std::string_view key,
-                                 bool& found_out) noexcept
-{
-    found_out = false;
-    uint32_t mask = cap - 1;
-    uint32_t first_slot = UINT32_MAX;   // 记录第一个可 reuse (empty/tombstone) 的 bucket
-    for (uint32_t i = 0; i < kMaxProbeIndex; ++i) {
-        uint32_t b = static_cast<uint32_t>((hash + i) & mask);
-        IndexEntry& e = idx_arr[b];
-        uint64_t h = e.key_hash.load(std::memory_order_acquire);
-        if (h == kHashEmpty) {
-            if (first_slot == UINT32_MAX) first_slot = b;
-            return first_slot;   // probe 遇空即停 (查找失败, 但返回可插入位置)
-        }
-        if (h == kHashTombstone) {
-            if (first_slot == UINT32_MAX) first_slot = b;
-            continue;   // 跳过 tombstone 继续查
-        }
-        if (h == hash) {
-            // 验证 key 前缀
-            size_t cmp_n = key.size() < 16 ? key.size() : 16;
-            if (std::memcmp(e.key_prefix, key.data(), cmp_n) == 0) {
-                found_out = true;
-                return b;
-            }
-        }
-    }
-    return first_slot;   // 探测满仍未找到, 返回可插入位置 (可能是 UINT32_MAX 表示全占)
-}
 
 // =============================================================================
 // OmsShmWriter — 只由 OMS 进程调用
