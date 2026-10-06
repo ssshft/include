@@ -188,8 +188,15 @@ struct alignas(64) OmsShmHeader {
     std::atomic<uint64_t> total_alloc_failures;
     std::atomic<uint64_t> total_stale_live_reclaims;  // v2 新增: 卡单强制回收次数
 
+    // v4 新增 —— **全部落在原来的保留 pad 里, sizeof 仍是 4 KB, 所以不需要再 bump
+    // kVersion**: 旧文件这几个字段读出来就是 0, 而 0 的语义恰好是"从未发生", 正确。
+    std::atomic<uint64_t> total_alloc_slowpath;       // alloc 快路径 128 步落空、全表扫救回次数
+    std::atomic<uint64_t> total_alloc_exhausted;      // 全表扫也没有可回收 slot → 真·环满
+    std::atomic<uint64_t> total_key_sync_failures;    // key 变更时索引插入失败 (保持旧 key 不变)
+    // 注: total_alloc_failures = total_alloc_exhausted + (索引插入失败次数)
+
     // 填充到 4 KB, 剩余保留将来扩展
-    char pad[4096 - 112];
+    char pad[4096 - 112 - 24];
 };
 static_assert(sizeof(OmsShmHeader) == 4096, "OmsShmHeader must be 4 KB");
 
@@ -707,6 +714,11 @@ public:
         uint32_t capacity = 0;
         uint64_t total_inserts = 0, total_updates = 0, total_reclaims = 0;
         uint64_t total_stale_live_reclaims = 0, total_alloc_failures = 0;
+        // ★ ③ / ② 的专属计数 (v4)。
+        //   total_alloc_failures = total_alloc_exhausted + (索引插入失败次数);
+        //   total_alloc_slowpath 是"快路径落空但被全表扫救回来"的次数, **不计入失败**。
+        uint64_t total_alloc_slowpath = 0, total_alloc_exhausted = 0;
+        uint64_t total_key_sync_failures = 0;
         uint64_t min_reclaim_age_ns = 0, max_live_stale_ns = 0;
 
         // ★ 索引占用 (每个索引一套)。
@@ -768,6 +780,9 @@ public:
         s.total_reclaims            = header()->total_reclaims.load(std::memory_order_relaxed);
         s.total_stale_live_reclaims = header()->total_stale_live_reclaims.load(std::memory_order_relaxed);
         s.total_alloc_failures      = header()->total_alloc_failures.load(std::memory_order_relaxed);
+        s.total_alloc_slowpath      = header()->total_alloc_slowpath.load(std::memory_order_relaxed);
+        s.total_alloc_exhausted     = header()->total_alloc_exhausted.load(std::memory_order_relaxed);
+        s.total_key_sync_failures   = header()->total_key_sync_failures.load(std::memory_order_relaxed);
         s.min_reclaim_age_ns        = header()->min_reclaim_age_ns;
         s.max_live_stale_ns         = header()->max_live_stale_ns;
         return s;
@@ -899,6 +914,10 @@ public:
         header()->total_updates.store(0);
         header()->total_reclaims.store(0);
         header()->total_alloc_failures.store(0);
+        header()->total_stale_live_reclaims.store(0);   // 漏了这条 → reset 后 doctor 会误报卡单
+        header()->total_alloc_slowpath.store(0);
+        header()->total_alloc_exhausted.store(0);
+        header()->total_key_sync_failures.store(0);
     }
 
     // 主接口: upsert 一条订单
@@ -921,6 +940,8 @@ public:
         // 新 slot
         uint32_t idx = alloc_slot();
         if (idx == kInvalidSlot) {
+            // 真·环满 (快慢两遍都没找到)。诊断和 total_alloc_exhausted 已经在
+            // alloc_slot() 里打过了, 这里只补总失败计数。
             header()->total_alloc_failures.fetch_add(1, std::memory_order_relaxed);
             return kInvalidSlot;
         }
@@ -987,12 +1008,13 @@ public:
     }
 
 private:
-    // 找一个可用 slot. 优先级:
+    // 从 next_slot_hint 起扫**连续 n 个** slot, 找一个可回收的。优先级:
     //   1. EMPTY  → 直接用
     //   2. FINISHED 且 age > min_reclaim_age_ns → 回收 (最常见路径)
     //   3. LIVE 且 age > max_live_stale_ns → **强制回收** (卡单 / 僵尸兜底), 打 WARN
     // 找到即 CAS 到 RECLAIMING, 保证只有一个 writer 抢到 slot。
-    uint32_t alloc_slot() {
+    // ★ 扫满 n 个还没找到就返回 kInvalidSlot, **不重置 hint** (每步都已经 fetch_add 过了)。
+    uint32_t alloc_slot_scan(uint32_t n) {
         uint32_t cap = slot_capacity();
         uint32_t mask = cap - 1;
         bool pow2 = (cap & (cap - 1)) == 0;
@@ -1000,7 +1022,7 @@ private:
         uint64_t min_finished_age = header()->min_reclaim_age_ns;
         uint64_t max_live_stale   = header()->max_live_stale_ns;
 
-        for (uint32_t attempt = 0; attempt < kMaxProbeSlots; ++attempt) {
+        for (uint32_t attempt = 0; attempt < n; ++attempt) {
             uint64_t h = header()->next_slot_hint.fetch_add(1, std::memory_order_relaxed);
             uint32_t idx = pow2 ? static_cast<uint32_t>(h & mask)
                                 : static_cast<uint32_t>(h % cap);
@@ -1058,6 +1080,92 @@ private:
             // 其他 (LIVE 但没 stale, 或 RECLAIMING 中): 跳过
         }
         return kInvalidSlot;
+    }
+
+    // 找一个可用 slot。
+    //   快路径: 从 hint 起 kMaxProbeSlots 步 —— 命中率极高, 也是热路径唯一成本。
+    //   慢路径: 快路径落空时**再全表扫一遍**。
+    //     ★ 为什么必须有 (③, 见 OMS_SHM_REVIEW.md §2.7): 128 步窗口挡不住"连续 128 张在途单"
+    //       这种**常规输入**。实测 (cap=4096, 连续 LIVE 块 512/1024/2048) 丢单率
+    //       1/1024 ~ 1/140, 且**全部**是"窗口内没有、全表却有" —— 本可避免。
+    //       更糟的是失败时 hint 已经前进 128, 下一次调用看的是别的区域,
+    //       这张单**没有第二次机会**。
+    //     ★ 慢路径是 O(slot_capacity) 的一次扫描, 只在"已经要丢单"的状态下走 —— 用几十 µs
+    //       换回一张单完全值, 正常负载下一次都不会触发。
+    //     ★ **绝不能重置 next_slot_hint** —— 否则并发 writer 会反复扫同一段。
+    uint32_t alloc_slot() {
+        uint32_t idx = alloc_slot_scan(kMaxProbeSlots);
+        if (idx != kInvalidSlot) return idx;
+
+        const uint32_t cap = slot_capacity();
+        if (cap > kMaxProbeSlots) {      // cap <= 窗口时, 快路径已经扫过全表了
+            idx = alloc_slot_scan(cap);
+            if (idx != kInvalidSlot) {
+                const uint64_t n =
+                    header()->total_alloc_slowpath.fetch_add(1, std::memory_order_relaxed) + 1;
+                // ★ 限流: 前 8 次必打, 之后每 4096 次打一条。突发时(实测最坏 1/140)不限流会刷爆
+                //   日志; 但也不能彻底静默 —— 那正是这次要修的毛病。计数永远在。
+                if (n <= 8 || (n % 4096) == 0) {
+                    std::fprintf(stderr,
+                        "[OmsShm][WARN] alloc 快路径 %u 步落空, 全表扫描救回 slot=%u (累计 %llu 次)\n"
+                        "  hint 前方有 >= %u 个连续不可回收 slot —— 在途单过于集中;\n"
+                        "  频繁出现说明 slot_capacity 余量不够 (或上层 finalize 不及时)\n",
+                        kMaxProbeSlots, idx, (unsigned long long)n, kMaxProbeSlots);
+                }
+                return idx;
+            }
+        }
+
+        // 真·环满: 快慢两遍都没找到可回收 slot —— 这才是真的没地方放。
+        // ★ 同样限流: 环满之后**每一张单**都会走到这里, 不限流就是刷屏。
+        const uint64_t n =
+            header()->total_alloc_exhausted.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (n <= 8 || (n % 4096) == 0) alloc_exhausted_report(n);
+        return kInvalidSlot;
+    }
+
+    // 真·环满诊断: 再走一遍 slot 统计各状态, 用来区分"全是 LIVE 未终态"和
+    // "FINISHED 还没过 min_reclaim_age"。只在**要丢单**的路径上调用 (O(slot_capacity))。
+    // 之前这条路径在 upsert 里是**完全静默**的 (只 total_alloc_failures++), 日志里看不见。
+    void alloc_exhausted_report(uint64_t nth) {
+        const uint32_t cap = slot_capacity();
+        const uint64_t t = now_ns();
+        uint64_t n_live = 0, n_finished = 0, n_reclaiming = 0, n_empty = 0;
+        uint64_t youngest_finish_age = UINT64_MAX;   // FINISHED 里最年轻的那个的 age
+        for (uint32_t i = 0; i < cap; ++i) {
+            uint32_t st = slots()[i].state.load(std::memory_order_relaxed);
+            if (st == SLOT_LIVE) {
+                ++n_live;
+            } else if (st == SLOT_FINISHED) {
+                ++n_finished;
+                uint64_t age = t - slots()[i].finish_time_ns;
+                if (age < youngest_finish_age) youngest_finish_age = age;
+            } else if (st == SLOT_RECLAIMING) {
+                ++n_reclaiming;
+            } else {
+                ++n_empty;
+            }
+        }
+        std::fprintf(stderr,
+            "[OmsShm][ERROR] alloc_slot 快慢两遍扫描都失败: 环里没有可回收 slot (累计 %llu 次)\n"
+            "  slot_cap=%u  live=%llu finished=%llu reclaiming=%llu empty=%llu\n"
+            "  min_reclaim_age_ms=%llu  max_live_stale_ms=%llu\n",
+            (unsigned long long)nth,
+            cap, (unsigned long long)n_live, (unsigned long long)n_finished,
+            (unsigned long long)n_reclaiming, (unsigned long long)n_empty,
+            (unsigned long long)(header()->min_reclaim_age_ns / 1'000'000),
+            (unsigned long long)(header()->max_live_stale_ns / 1'000'000));
+        if (n_finished) {
+            std::fprintf(stderr,
+                "  最年轻的 FINISHED 距现在 %llu ms (< min_reclaim_age_ms → 等一会就有位置)\n",
+                (unsigned long long)(youngest_finish_age / 1'000'000));
+        } else {
+            std::fprintf(stderr,
+                "  一个 FINISHED 都没有 → 全是 LIVE 未终态, 在途单数已经 >= slot_cap\n");
+        }
+        std::fprintf(stderr,
+            "  → 该单未写入 SHM, total_alloc_failures / total_alloc_exhausted 都会 +1\n"
+            "  → 长期出现就是 slot_capacity 不够: 加大 capacity, 或让上层及时 finalize 订单\n");
     }
 
     void write_new_slot(uint32_t idx, const pubsub::RCommand& rcmd) {
@@ -1160,13 +1268,39 @@ private:
         sync_one_key(idx, IDX_EXCHANGE_ID, s.orderId, sizeof(s.orderId), resp.orderId);
     }
 
-    // 同步一个 key 副本: 变了就 tombstone 旧索引项 → 改副本 → 挂新索引项。
+    // 同步一个 key 副本: 变了就**先挂新索引项, 成功后再 tombstone 旧项、改副本**。
+    //   ★ 顺序约束 (别改回去): tombstone_index 是拿 slot 里的**当前副本**去比对的, 所以
+    //     必须在改副本**之前** tombstone 旧 key, 否则旧条目比不中, 会永远留在索引里。
+    //     把 insert 提到最前面正好两全: 插入成功时副本仍是旧值 → tombstone 比得中旧 key。
+    //   ★ 为什么 insert 必须看返回值 (②, 见 OMS_SHM_REVIEW.md §2.7):
+    //     旧写法是 tombstone(旧) → memcpy(新) → insert(新) 且**丢弃返回值**。一旦 insert
+    //     失败, 就变成"旧条目已删、副本已改、新条目没挂上" —— **新旧两个 key 都查不到**,
+    //     slot 彻底不可达 (不只是"新 key 查不到")。现在失败就整体不动, 保持
+    //     "副本 == 索引" 这个不变量: 至少旧 key 还能查到。
     void sync_one_key(uint32_t idx, IndexKind kind, char* dst, size_t dst_sz,
                       const char* new_val) {
         if (!new_val || !new_val[0]) return;                   // 这次没带这个字段
         if (std::strncmp(dst, new_val, dst_sz) == 0) return;   // 没变
         const std::string_view old_val(dst, strnlen_max(dst, dst_sz));
         const std::string_view nv(new_val, strnlen_max(new_val, dst_sz - 1));
+
+        if (!insert_index(kind, nv, idx)) {
+            // 索引满 (探测步数被连续 live 段吃光)。此时**什么都不改**。
+            // ★ 限流: orderId 首次设定 ("" → 非空) 也走这条 insert, 是**每单一次**,
+            //   索引饱和时会变成每单一条日志 —— 前 8 次必打, 之后每 4096 次打一条。
+            const uint64_t n =
+                header()->total_key_sync_failures.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (n <= 8 || (n % 4096) == 0) {
+                std::fprintf(stderr,
+                    "[OmsShm][WARN] %s key 变更时索引插入失败 slot=%u: \"%.*s\" -> \"%.*s\" "
+                    "(累计 %llu 次); 保持旧 key 与副本不变, 副本与索引仍然一致\n",
+                    index_kind_name(kind), idx,
+                    static_cast<int>(old_val.size()), old_val.data(),
+                    static_cast<int>(nv.size()), nv.data(),
+                    (unsigned long long)n);
+            }
+            return;
+        }
         if (!old_val.empty()) {
             // 非空 → 非空 才叫"变更"; "" → 非空 是首次设定 (orderId 的正常路径), 静默
             std::fprintf(stderr,
@@ -1175,12 +1309,11 @@ private:
                 idx, index_kind_name(kind),
                 static_cast<int>(old_val.size()), old_val.data(),
                 static_cast<int>(nv.size()), nv.data());
-            tombstone_index(kind, old_val);
+            tombstone_index(kind, old_val);   // ★ 必须在 memcpy 之前 (拿旧副本才比得中)
         }
         const size_t nn = nv.size();
         std::memcpy(dst, nv.data(), nn);
         dst[nn] = 0;
-        insert_index(kind, nv, idx);
     }
 
     // 复制字符串到定长 buffer, null-terminate

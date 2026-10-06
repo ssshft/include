@@ -659,8 +659,47 @@ total_alloc_failures
 
 
 
-环耗尽 / 索引饱和, tb 无法新单 (🔴严重); 成因看 worst_live_run
+有单没写进 SHM (🔴严重); 成因看下面 alloc_exhausted (环满) / key_sync_failures (索引饱和)
 
+
+
+
+
+total_alloc_exhausted
+
+
+
+> 0
+
+
+
+真·环满: 快慢两遍全表扫描都没找到可回收 slot → **单丢了** (🔴严重); 看 live / finished / min_reclaim_age
+
+
+
+
+total_alloc_slowpath
+
+
+
+> 0
+
+
+
+快路径 128 步落空、被全表扫描**救回** (🟡单没丢, 但余量在消耗); 在途单过于集中 → 考虑加大 slot_capacity
+
+
+
+
+total_key_sync_failures
+
+
+
+> 0
+
+
+
+key 变更时索引插入失败, 已保持旧 key (🟡索引饱和); 订单仍可查, 只是没跟上这次变更
 
 
 
@@ -746,7 +785,17 @@ Q1: tb 起来看到 "recover orphan RECLAIMING slot" WARN
 
 Q2: alloc_failures > 0, tb 报 upsert 失败
 
-先看 stderr 里那句判读 (B6 起日志自带结论), 两种成因动作完全相反:
+v4 起成因可以直接从计数分辨, 不用猜:
+
+total_alloc_exhausted > 0   → 真·环满 (快慢两遍全表扫描都没找到可回收 slot), 单确实丢了。
+                              stderr 有 "[ERROR] alloc_slot 快慢两遍扫描都失败" + 各状态快照
+key_sync_failures    > 0    → 索引饱和, key 变更时插不进去 (单还在, 已保持旧 key, 见 Q8)
+total_alloc_slowpath > 0    → 单没丢 (被慢路径救回), 但余量在消耗 → 预警
+
+注意 v4 起 alloc_slot 是"快路径 128 步 + 全表兜底"两段式: 128 步落空**不再直接丢单**,
+只有全表扫也找不到才会失败 —— 所以 alloc_failures > 0 现在**必然**是真环满。
+
+另外先看 stderr 里那句判读 (B6 起日志自带结论), 两种成因动作完全相反:
 
 
 
@@ -801,6 +850,23 @@ Q7: 升级到索引 4N 之后 tb 起不来, 报 "magic/version mismatch" 或 "< 
 CONFIRM=1 ./oms_shm.sh reset     # 或直接 rm /dev/shm/tb_oms.dat
 # 重启新版 tb, 文件会按 4N 重建
 ./oms_shm.sh doctor              # 确认 ✓ worst_live_run 远小于 probe_max
+
+
+
+Q8: key_sync_failures > 0 (key 变更时索引插入失败)
+
+含义: 报单体里的 key 变了 (典型是 orderId 首次从空变成交易所单号), 但索引 32 步内没有可复用
+bucket, 新 key 挂不上去。 v4 起的处理是**保持旧 key 与副本不变** —— 订单仍然查得到, 只是没
+跟上这次变更。
+
+v4 之前是另一回事: 顺序是 tombstone(旧) → memcpy(新) → insert(新) 且**丢弃返回值**, 一旦
+insert 失败就变成"旧条目已删、副本已改、新条目没挂上" —— **新旧 key 都查不到**, slot 彻底
+不可达 (不只是"新 key 查不到")。 实测 (kMaxProbeIndex=1 的头文件副本, 5 轮改 key, 320 次)
+旧代码破坏 32 次不变量, 新代码 0 次。
+
+动作: 按索引饱和处理 —— 看 oms_query --stats 的 index live/tomb/empty 与 worst_live_run,
+必要时加大 index_capacity 的倍数。 日志前 8 条必打、之后每 4096 次一条, 计数永远准。
+
 
 
 
