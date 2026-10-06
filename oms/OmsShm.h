@@ -76,6 +76,16 @@ enum IndexKind : uint32_t {
     IDX_COUNT         = 3,
 };
 
+// 索引名的唯一来源 (日志 / 工具共用, 避免两处字符串漂移)
+inline const char* index_kind_name(uint32_t k) noexcept {
+    switch (k) {
+        case IDX_ORDER_SYS_ID: return "orderSysId";
+        case IDX_CLIENT_ORDER: return "clientOrderId";
+        case IDX_EXCHANGE_ID:  return "orderId";
+        default:               return "?";
+    }
+}
+
 // Slot 状态机
 enum SlotState : uint32_t {
     SLOT_EMPTY      = 0,   // 从未用过或已被 reclaim 完成
@@ -589,6 +599,20 @@ public:
         uint64_t total_inserts = 0, total_updates = 0, total_reclaims = 0;
         uint64_t total_stale_live_reclaims = 0, total_alloc_failures = 0;
         uint64_t min_reclaim_age_ns = 0, max_live_stale_ns = 0;
+
+        // ★ 索引占用 (每个索引一套)。
+        //   稳态下 slot 环填满后: live ≈ slot_cap, tomb ≈ slot_cap, 所以
+        //   live + tomb ≈ index_capacity 且 empty → 0 —— 这是**正常现象**, 不是泄漏。
+        //   此时插入能否成功全靠 `kMaxProbeIndex` 步内找到 tombstone。
+        //   关注点: empty 掉到 0 附近, 且 total_alloc_failures 开始增长 → 索引要加容量。
+        struct IndexOccupancy {
+            uint32_t live  = 0;   // 有效条目
+            uint32_t tomb  = 0;   // tombstone (已删, 仍占 bucket)
+            uint32_t empty = 0;   // 从未用过
+            uint32_t used() const noexcept { return live + tomb; }
+        };
+        uint32_t       index_capacity = 0;              // 每个索引的 bucket 数
+        IndexOccupancy index_occupancy[IDX_COUNT] = {}; // 下标 = IndexKind
     };
     Stats stats() const {
         Stats s{};
@@ -611,6 +635,11 @@ public:
                 case SLOT_RECLAIMING: ++s.reclaiming; break;
             }
         }
+        // ★ 索引占用扫描。纯诊断用 (O(index_capacity * IDX_COUNT)), 不在热路径上。
+        s.index_capacity = index_capacity();
+        for (uint32_t k = 0; k < IDX_COUNT; ++k) {
+            if (index(k)) s.index_occupancy[k] = index_occupancy_of(static_cast<IndexKind>(k));
+        }
         s.total_inserts             = header()->total_inserts.load(std::memory_order_relaxed);
         s.total_updates             = header()->total_updates.load(std::memory_order_relaxed);
         s.total_reclaims            = header()->total_reclaims.load(std::memory_order_relaxed);
@@ -619,6 +648,22 @@ public:
         s.min_reclaim_age_ns        = header()->min_reclaim_age_ns;
         s.max_live_stale_ns         = header()->max_live_stale_ns;
         return s;
+    }
+
+    // 单个索引的占用快照 (诊断用, O(index_capacity))。stats() 与 upsert 失败日志共用。
+    Stats::IndexOccupancy index_occupancy_of(IndexKind kind) const noexcept {
+        Stats::IndexOccupancy occ{};
+        if (kind >= IDX_COUNT) return occ;              // 防越界 (index() 本身不检查)
+        const uint32_t cap = index_capacity();
+        IndexEntry* arr = index(kind);
+        if (!arr || cap == 0) return occ;
+        for (uint32_t i = 0; i < cap; ++i) {
+            uint64_t h = arr[i].key_hash.load(std::memory_order_relaxed);
+            if (h == kHashEmpty)          ++occ.empty;
+            else if (h == kHashTombstone) ++occ.tomb;
+            else                          ++occ.live;
+        }
+        return occ;
     }
 
     static uint64_t now_ns() noexcept {
@@ -740,12 +785,32 @@ public:
             return kInvalidSlot;
         }
         write_new_slot(idx, rcmd);
-        if (!insert_all_indices(idx, rcmd)) {
-            // 索引全满 (罕见, index_capacity=2N + linear probe 一般不会到) — 回滚 slot
+        IndexKind failed = IDX_COUNT;
+        if (!insert_all_indices(idx, &failed)) {
+            // 索引写不进去 —— 罕见, 但一旦发生这张单就**没进 SHM** (total_alloc_failures++)。
+            // ★ 先别急着加容量: 下面把占用快照打出来, 用"可复用 bucket 占比"区分两类成因。
+            //   注意判据是 tomb+empty 而不是 empty —— 环满稳态下 empty 本来就是 0,
+            //   但 tombstone 是可复用的, 那种情况属于探测序列问题而非容量不够。
+            // ★ index_capacity 是 next_pow2(2 × slot_cap), **不是** 2 × slot_cap。
+            // ★ 也**不要**再去查 "tombstone 泄漏" —— 实测已排除: 环满时
+            //   live + tomb == index_capacity 是设计如此 (见 OMS_SHM_REVIEW.md §0.2)。
+            const Stats::IndexOccupancy occ = index_occupancy_of(failed);
+            const uint32_t icap = index_capacity();
             std::fprintf(stderr,
-                "[OmsShm][ERROR] insert_index full, rollback slot=%u orderSysId=%s. "
-                "Consider raising index_capacity or investigating tombstone leak.\n",
-                idx, rcmd.body.orderResponse.orderSysId);
+                "[OmsShm][ERROR] index insert failed: kind=%s slot=%u orderSysId=%s\n"
+                "  slot_cap=%u  index_capacity=%u (=next_pow2(2*slot_cap))  probe_max=%u\n"
+                "  index occupancy: live=%u tomb=%u empty=%u  (used=%.2f%%)\n"
+                "  %s\n"
+                "  → 该单未写入 SHM, total_alloc_failures 已 +1, 上层会当作写失败处理\n",
+                index_kind_name(failed), idx, rcmd.body.orderResponse.orderSysId,
+                slot_capacity(), icap, kMaxProbeIndex,
+                occ.live, occ.tomb, occ.empty,
+                icap ? 100.0 * occ.used() / icap : 0.0,
+                (icap && (occ.tomb + occ.empty) < icap / 10)
+                    ? "索引已近满 (可复用 bucket tomb+empty < 10%) → 加大 slot_cap, "
+                      "index_capacity 会随之变成 next_pow2(2*slot_cap)"
+                    : "仍有可复用 bucket (tomb+empty ≥ 10%) 但 probe_max 步内没找到 "
+                      "→ 探测序列/聚集问题, **不是容量不够**");
             OmsSlot& s = slots()[idx];
             s.seq.fetch_add(1, std::memory_order_release);
             s.state.store(SLOT_EMPTY, std::memory_order_release);
@@ -919,10 +984,13 @@ private:
 
     // 插入三层索引. 主索引 (orderSysId) 失败 → 整体失败; 别名失败只 log, 因为
     // 主索引 OK 就能查到, 别名冗余用。
-    bool insert_all_indices(uint32_t idx, const pubsub::RCommand& /*rcmd*/) {
+    // 返回 false 时 *failed_kind = 失败的那个索引 (供上层日志定位; 未失败则 = IDX_COUNT)
+    bool insert_all_indices(uint32_t idx, IndexKind* failed_kind = nullptr) {
+        if (failed_kind) *failed_kind = IDX_COUNT;
         OmsSlot& s = slots()[idx];
         if (s.orderSysId[0]) {
             if (!insert_index(IDX_ORDER_SYS_ID, s.orderSysId, idx)) {
+                if (failed_kind) *failed_kind = IDX_ORDER_SYS_ID;
                 return false;   // 主索引失败, 上层回滚
             }
         }
