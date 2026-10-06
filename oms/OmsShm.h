@@ -1192,9 +1192,23 @@ private:
             std::fprintf(stderr,
                 "  一个 FINISHED 都没有 → 全是 LIVE 未终态, 在途单数已经 >= slot_cap\n");
         }
+        // ★ 把"到底能跑多快"直接算出来 —— 这是这次事故真正缺的那个数。
+        //   稳态占用 ≈ 写入速率 × min_reclaim_age, 所以容量给定时,
+        //   可持续速率上限 = slot_cap / min_reclaim_age。超过它必然写满丢单,
+        //   跟"上层有没有及时 finalize"无关。实测 (slot_cap=131072, TTL=60s):
+        //   上限只有 ~2185 单/秒, 而 bench 压到 70 万单/秒 → 0.2 秒写满。
+        if (header()->min_reclaim_age_ns) {
+            const uint64_t ceiling =
+                static_cast<uint64_t>(cap) * 1'000'000'000ULL / header()->min_reclaim_age_ns;
+            std::fprintf(stderr,
+                "  → 可持续写入速率上限 ≈ slot_cap / min_reclaim_age = %llu 单/秒\n"
+                "     (稳态占用 ≈ 写入速率 × min_reclaim_age; 超过这个速率必然写满)\n",
+                (unsigned long long)ceiling);
+        }
         std::fprintf(stderr,
             "  → 该单未写入 SHM, total_alloc_failures / total_alloc_exhausted 都会 +1\n"
-            "  → 长期出现就是 slot_capacity 不够: 加大 capacity, 或让上层及时 finalize 订单\n");
+            "  → 长期出现就是 slot_capacity 不够: 加大 capacity, 调小 min_reclaim_age,\n"
+            "     或让上层及时 finalize 订单\n");
     }
 
     void write_new_slot(uint32_t idx, const pubsub::RCommand& rcmd) {

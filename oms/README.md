@@ -293,9 +293,25 @@ oms_query --shm=/dev/shm/tb_oms.dat --stats
 oms_bench —— 性能测试
 
 oms_bench --shm=/dev/shm/tb_bench.dat --capacity=131072 \
-          --iters=1000000 --readers=4 --reset
+          --iters=1000000 --readers=4 --mixed-ttl-ms=0 --reset
 
-测量: insert / update / lookup 吞吐 + p50 / p95 / p99 / p999 / max 延迟。 混合场景 1 writer + N readers。
+测量: insert / update / lookup 吞吐 + p50 / p95 / p99 / p999 / max 延迟。 混合场景 1 writer + N readers
+(writer 和每个 reader 的吞吐都会打印)。
+
+★ --mixed-ttl-ms (默认 0) 只在 MIXED 相位生效, 它决定这个相位能不能"跑得下去":
+
+    可持续写入速率上限 ≈ slot_cap / min_reclaim_age
+
+  生产默认 TTL 是 60s, 所以 131072 slot 只够约 2185 单/秒; 而本机实测写入 ~70 万单/秒
+  → 环 0.2 秒就写满, 之后**每一张单都失败**并刷 [OmsShm][ERROR]。
+  MIXED 相位因此默认用 0 (= FINISHED 立刻可回收), 保证任何机器/容量都不会写满;
+  想复现"环写满"的行为, 显式给一个大值 (如 --mixed-ttl-ms=60000)。
+
+  自检: 相位结束会打印 `✓ 可持续: 0 丢单` 或 `✗ 不可持续: 丢了 N 单 … 上限 ≈ M 单/秒`。
+
+★ --reset 时若文件里已有的容量 ≠ --capacity, 会 unlink 重建。
+  (打开已存在的文件时容量一律从 header 读, --capacity 会被静默忽略 ——
+   一个遗留的 16k 文件会让 --capacity=131072 白传, 测出来的东西完全不是以为的。)
 
 oms_demo —— ⚠ 当前**不是** demo
 
@@ -724,6 +740,18 @@ total_alias_insert_failures
 
 
 主索引 OK 但 clientOrderId / orderId 别名插入失败 (🟡索引饱和); 单**在** SHM 里 (按 orderSysId 查得到), 但用该别名查不到 → 策略按 clientOrderId 查活单会落空 (漏撤单 / 重复下单)。**不计入** total_alloc_failures
+
+
+
+sustainable_insert_rate
+
+
+
+> 0
+
+
+
+可持续写入速率上限 = slot_cap / min_reclaim_age (单/秒); 0 = 不限制 (min_reclaim_age=0 时)。**这是容量与 TTL 一起决定的硬上限** —— 稳态占用 ≈ 写入速率 × min_reclaim_age, 实际下单速率超过它, 环必然写满并开始丢单 (跟上层 finalize 及不及时无关)
 
 
 
