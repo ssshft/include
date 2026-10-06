@@ -73,8 +73,8 @@ seqlock 无锁读, 单写多读, 读侧 ~200ns
                           │ /dev/shm/tb_oms.dat          │
                           │ [Header 4KB]                 │
                           │ [100k × 1024B Slots ~100MB]  │
-                          │ [3 × 200k × 32B Index ~19MB] │
-                          │ 总 ~120MB, 固定不涨          │
+                          │ [3 × 4N × 32B Index ~48MB]   │
+                          │ 总 ~146MB, 固定不涨          │
                           └──────────────┬───────────────┘
                                          │ mmap 读 (无锁)
                     ┌────────────────────┼────────────────────┐
@@ -92,9 +92,15 @@ SHM 布局
   magic / version / capacity / next_slot_hint / stats / TTL 配置
 [OmsSlot 数组 (N × 1024B)]
   每单一条: seqlock + state + 3 时间戳 + 3 key 副本 + RCommand
-[主索引 IDX_ORDER_SYS_ID (2N × 32B)]
-[别名索引 IDX_CLIENT_ORDER  (2N × 32B)]
-[别名索引 IDX_EXCHANGE_ID   (2N × 32B)]
+[主索引 IDX_ORDER_SYS_ID (4N × 32B)]
+[别名索引 IDX_CLIENT_ORDER  (4N × 32B)]
+[别名索引 IDX_EXCHANGE_ID   (4N × 32B)]
+
+索引容量是 next_pow2(4N) 而**不是** 4N, 且**必须是 2 的幂** (三处探测都用 (hash+i) & (cap-1))。
+倍数取 4 而不是 2 的原因见 OMS_SHM_REVIEW.md §2.5: 环填满后 empty 必然排干到 0, 插入能否成功
+只取决于 kMaxProbeIndex 步内能否碰到 tombstone, 上界是最长连续 live 段。2N 时可复用桶密度
+只有 0.5, 实测最长连续段 19 → 35 → 38~55 (随容量增长) 全部 > 32 → 静默丢单; 4N 把密度提到
+0.75, 连续段塌到 13~20。代价是索引内存翻倍 (100k slot: 121.7 → 145.7 MiB)。
 
 Slot 状态机
 
@@ -212,7 +218,7 @@ if (stats.live_stale > 0) alert(...);
 Writer (只在 OMS 单进程/单线程调用, 有写权限)
 
 oms::shm::OmsShmWriter writer;
-writer.open("/dev/shm/tb_oms.dat", /*capacity=*/131072);  // 建议 2^N
+writer.open("/dev/shm/tb_oms.dat", /*capacity=*/131072);  // slot 数, 1 .. 2^28; 索引容量自动 = next_pow2(4N)
 
 // 写路径
 pubsub::RCommand rcmd = /* 从 TradeUnit 收到的订单事件 */;
@@ -318,7 +324,7 @@ Docker Compose:
 
 services:
   tb:
-    shm_size: 256m           # 100k slot 需要 ~120MB, 加 headroom
+    shm_size: 384m           # 100k slot 需要 ~146MB (slot 100MB + 索引 48MB), 加 headroom
     volumes:
       - tb_shm:/dev/shm      # 可选: 独立命名 volume, 便于备份
 volumes:
@@ -327,7 +333,7 @@ volumes:
     driver_opts:
       type: tmpfs
       device: tmpfs
-      o: size=256m
+      o: size=384m
 
 Kubernetes (StatefulSet):
 
@@ -335,7 +341,7 @@ volumes:
   - name: tb-shm
     emptyDir:
       medium: Memory
-      sizeLimit: 256Mi
+      sizeLimit: 384Mi
 
 系统 tmpfs (/etc/fstab):
 
@@ -653,9 +659,21 @@ total_alloc_failures
 
 
 
-环耗尽, tb 无法新单 (🔴严重)
+环耗尽 / 索引饱和, tb 无法新单 (🔴严重); 成因看 worst_live_run
 
 
+
+
+
+worst_live_run
+
+
+
+>= probe_max
+
+
+
+索引已饱和: 探测步数被连续 live 段吃光 → 正在丢单 (🔴严重); 余量 < 1.5 倍则 🟡
 
 
 
@@ -728,7 +746,7 @@ Q1: tb 起来看到 "recover orphan RECLAIMING slot" WARN
 
 Q2: alloc_failures > 0, tb 报 upsert 失败
 
-根因: 100k slot 全被 LIVE 占满且都没到 stale 阈值。 检查:
+先看 stderr 里那句判读 (B6 起日志自带结论), 两种成因动作完全相反:
 
 
 
@@ -742,7 +760,13 @@ Q2: alloc_failures > 0, tb 报 upsert 失败
 
 
 
-是否需要 raise capacity (改 131072 → 262144, 重建 shm)?
+- 日志写 "最长连续 live 段 >= probe_max → 聚集": **不要**加大 slot_cap。 环满后 empty 必然
+  排干到 0, 与 slot_cap 无关; 要加大的是 index_capacity 的倍数 (现在是 next_pow2(4*slot_cap))。
+  `oms_query --stats` 的 worst_live_run / probe_max 就是余量。
+- 日志写 "max_live_run < probe_max, 本不该失败": 异常, 连同日志里的快照上报。
+
+仍要排除的: 是否策略在海量下单不撤? 是否 max_live_stale_ns 太长 (默认 24h) ? slot 环本身
+耗尽时 (与索引无关), `oms_query --stats` 会显示 live 顶到 capacity 且 empty=0。
 
 Q3: stale_live_reclaims 持续增长
 
@@ -766,6 +790,17 @@ Q5: 想现场调 max_live_stale (不重启 tb)
 Q6: reader 端 lookup 一直 NOT_FOUND, 但 tb 显示单在
 
 原因: 通常是 shm 路径不一致。 确认 reader / writer 用同一 path。 另可能是版本不匹配, magic 校验拒绝加载。
+
+Q7: 升级到索引 4N 之后 tb 起不来, 报 "magic/version mismatch" 或 "< 4 * slot_capacity"
+
+这是**预期**的, 不是 bug。 索引容量算法从 2N 改成 next_pow2(4N) 时 kVersion 从 2 提到了 3
+(旧文件的 index_capacity 也是 2 的幂, 光靠幂校验挡不住, 所以必须靠版本号)。 老文件索引密度
+只有 0.5, 环满后会静默丢单, 不能带病继续跑。 处理:
+
+# 撤所有活单 (通过交易所 UI/API) —— 重建会丢掉 shm 里的活单状态
+CONFIRM=1 ./oms_shm.sh reset     # 或直接 rm /dev/shm/tb_oms.dat
+# 重启新版 tb, 文件会按 4N 重建
+./oms_shm.sh doctor              # 确认 ✓ worst_live_run 远小于 probe_max
 
 
 
