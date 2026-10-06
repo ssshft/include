@@ -202,10 +202,31 @@ now - last_update_time_ns > max_live_stale_ns (默认 24h)
 
 pubsub::RCommand out;
 seg.lookup_by_orderSysId("t-strat1-9382", out);
-seg.lookup_by_clientOrderId(static_cast<int64_t>(9382), out);   // 匹配 pubsub 原生 long
-seg.lookup_by_clientOrderId(std::string_view("9382"), out);     // 字符串版, 兼容 CLI
+seg.lookup_by_clientOrderId("t-strat19382", out);               // **已复合**的字符串 (strategyId + cid)
 seg.lookup_by_orderId("ex-8001001", out);
 seg.exists_by_orderSysId("t-strat1-9382");   // 便捷: 只查存不存在
+
+★ 上面的 bool 版只回答"能不能查到"。**对账场景请改用三态版 `_ex()`** —— 见下面 B3 那段。
+  注意 `lookup_by_clientOrderId` 收的是**已复合**的 key 字符串 (writer 存的就是复合 key);
+  按 (strategyId, cid) 查请用 `lookup_by_client(strategyId, cid, out)`。
+
+查询三态 (B3): `lookup_by_*_ex()` 返回 `LookupStatus`
+
+auto st = seg.lookup_by_orderSysId_ex("t-strat1-9382", out);
+switch (st) {
+    case OmsShmSegment::LookupStatus::OK:        /* 找到, out 可用 */            break;
+    case OmsShmSegment::LookupStatus::NOT_FOUND: /* **确认**不存在 */             break;
+    case OmsShmSegment::LookupStatus::BUSY:      /* 索引里有这条, 但这一瞬间读不到
+                                                    (写者正在写 / slot 正在被 reclaim)
+                                                    → 稍后重试, **别**当"不存在" */ break;
+}
+const char* s = OmsShmSegment::to_string(st);   // "OK" / "NOT_FOUND" / "BUSY"
+
+★ 为什么必须有 BUSY: 旧的 bool 版把 NOT_FOUND 和 BUSY 混成同一个 false。 重启对账
+  据此会把**活单判成死单** → 重复下单 / 误平仓。 判据是"BUSY 与 NOT_FOUND 必须可区分"。
+★ `lookup_by_*` (bool) 语义不变 = (status == OK), 所有老调用点不受影响。
+★ BUSY 次数记在**进程内**: `seg.local_lookup_busy()`。 **不落 SHM** —— reader 的映射是
+  PROT_READ, 写共享计数器会 SIGBUS (实测过)。 对账/策略侧周期读它打进自己的 metrics 即可。
 
 // 遍历 (慢, O(N), 只用于对账 / snapshot)
 seg.iterate_live([](const pubsub::RCommand& r){ /* ... */ });
@@ -214,6 +235,7 @@ seg.iterate_finished(...);
 // 监控
 auto stats = seg.stats();
 if (stats.live_stale > 0) alert(...);
+if (seg.local_lookup_busy() > 0) warn("读侧被写者抢了 / 索引有陈旧条目");
 
 Writer (只在 OMS 单进程/单线程调用, 有写权限)
 
@@ -827,7 +849,17 @@ reclaiming
 
 或直接接 Prometheus (代码里加 --metrics-port= 参数暴露 HTTP)。
 
+B3: lookup BUSY 次数 (进程内, 不在上表)
 
+`seg.local_lookup_busy()` —— "索引里有这条, 但这一瞬间读不到一致快照"的次数。
+
+★ **刻意不放进 SHM**, 所以不在 `--stats` / `doctor` 里: reader 的映射是 PROT_READ
+  (open() 里 `read_only ? PROT_READ : PROT_READ|PROT_WRITE`), 往共享 header 写计数器
+  会撞写保护页 → SIGBUS。 而且策略进程都是只读 reader, 共享计数收不到它们的 BUSY,
+  只会变成一个"静默少报"的假健康指标 —— 比没有更糟。
+★ 所以它按**进程**计: 每个进程读自己的, 打进自己的 metrics / 日志。
+★ 判读: 偶发非零后归零 = 正常 (读者被写者抢了一下, 重试即可); **持续增长** = 读侧长期被抢,
+  或索引里有陈旧条目 —— 结合 `worst_live_run` / `probe_max` 一起看。
 
 八、故障处理
 
@@ -892,6 +924,17 @@ Q6: reader 端 lookup 一直 NOT_FOUND, 但 tb 显示单在
 
 原因: 通常是 shm 路径不一致。 确认 reader / writer 用同一 path。 另可能是版本不匹配, magic 校验拒绝加载。
 
+★ 如果只是**偶尔**查不到 (高并发下 0.0x%), 先用三态版确认到底是哪种:
+
+auto st = reader.lookup_by_orderSysId_ex(sid, out);
+if (st == OmsShmSegment::LookupStatus::BUSY) {
+    // 索引里有这条, 只是这一瞬间读不到 (写者正在写 / slot 正在被 reclaim)
+    // → 重试即可。 用 bool 版会把它和"不存在"混在一起, 看起来就像单丢了。
+}
+
+`reader.local_lookup_busy()` 持续增长说明读侧一直被写者抢 (或索引里有陈旧条目);
+单次非零、之后归零属正常。
+
 Q7: 升级到索引 4N 之后 tb 起不来, 报 "magic/version mismatch" 或 "< 4 * slot_capacity"
 
 这是**预期**的, 不是 bug。 索引容量算法从 2N 改成 next_pow2(4N) 时 kVersion 从 2 提到了 3
@@ -932,7 +975,9 @@ insert 失败就变成"旧条目已删、副本已改、新条目没挂上" —�
 
 
 
-只读 Reader —— 策略进程不得写 slot / 索引。 mmap 用 PROT_READ 时写会段错。
+只读 Reader —— 策略进程不得写 slot / 索引 / **header 里的任何计数器**。 mmap 用 PROT_READ 时写会段错。
+  ★ 这条包括"看起来只是观测"的计数: 在 lookup 热路径里 `header()->xxx.fetch_add(1)` 一样会崩
+    (实测 §17 并发用例 20 次挂 2 次, EXC_BAD_ACCESS code=2)。 读侧事件一律用**进程内**计数。
 
 
 
