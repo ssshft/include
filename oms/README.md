@@ -297,19 +297,31 @@ oms_bench --shm=/dev/shm/tb_bench.dat --capacity=131072 \
 
 测量: insert / update / lookup 吞吐 + p50 / p95 / p99 / p999 / max 延迟。 混合场景 1 writer + N readers。
 
-oms_demo —— 使用示例
+oms_demo —— ⚠ 当前**不是** demo
 
-完整流程演示: create → insert × 5 → update → lookup × 3 → iterate → stats → crash recover。
+`oms_demo.cpp` 目前与 `oms_bench.cpp` **逐字节相同** (md5 一致), 所以 `./oms_shm.sh demo`
+跑的实际是性能测试, 而不是本节原先描述的"功能演示"。功能演示请看 oms_test。
+待办 (D1): 要么补一个真的 demo, 要么删掉 oms_demo。
+
+oms_test —— 功能 / 边界 / 并发断言集 (推荐入口)
+
+覆盖 (18 节 / 182 条断言): 布局常量 / 三层索引往返 / orderId 生命周期 / LIVE→FINISHED→reclaim /
+环满不覆盖 LIVE / 慢路径救回 / key 同步失败 / 别名插入失败 / 卡单强制回收 / 稳态 tombstone /
+探测余量 / iterate 跳过计数 / 版本与容量拒绝 / 崩溃恢复 / reset_all / 并发 seqlock 撕裂读 /
+remove 与 recover_orphan_slots 的返回值与幂等 / is_open + created_new + close 往返。
+退出码 0 = 全绿。推荐用 `./oms_shm.sh test` 跑 (它会先强制重新构建, 再顺带校验
+`oms_query --stats` 的输出格式仍满足 doctor 的解析契约)。
 
 oms_shm.sh —— 一站式运维脚本
 
-./oms_shm.sh build               # 编译 3 个工具
+./oms_shm.sh build               # 编译 4 个工具 (query / bench / demo / test)
 ./oms_shm.sh check               # 环境检查 (/dev/shm 大小 / tmpfs / 权限)
-./oms_shm.sh demo                # 跑一次功能演示
+./oms_shm.sh demo                # ⚠ 目前等价于 bench (见上)
 ./oms_shm.sh stats [shm]         # 打 stats
 ./oms_shm.sh live [shm]          # 列活单
 ./oms_shm.sh stale [shm]         # 列卡单
 ./oms_shm.sh bench               # 跑性能测试
+./oms_shm.sh test [dir]          # 跑断言集 + 解析契约检查 (推荐)
 ./oms_shm.sh watch [shm]         # 持续监控 (5s 刷新)
 ./oms_shm.sh doctor [shm]        # 一键健康检查, 红字提示问题
 CONFIRM=1 ./oms_shm.sh reset [shm]  # 危险: 清空 SHM
@@ -352,7 +364,7 @@ tmpfs   /dev/shm   tmpfs   defaults,size=1G,nodev,nosuid   0 0
 cd new_dev/tb/tools
 ./oms_shm.sh build
 
-生成: oms_query, oms_bench, oms_demo。
+生成: oms_query, oms_bench, oms_demo, oms_test。
 
 3. 启动前检查
 
@@ -703,6 +715,18 @@ key 变更时索引插入失败, 已保持旧 key (🟡索引饱和); 订单仍�
 
 
 
+total_alias_insert_failures
+
+
+
+> 0
+
+
+
+主索引 OK 但 clientOrderId / orderId 别名插入失败 (🟡索引饱和); 单**在** SHM 里 (按 orderSysId 查得到), 但用该别名查不到 → 策略按 clientOrderId 查活单会落空 (漏撤单 / 重复下单)。**不计入** total_alloc_failures
+
+
+
 
 worst_live_run
 
@@ -944,6 +968,7 @@ new_dev/
 └── tb/tools/
     ├── oms_query.cpp           # CLI 查询
     ├── oms_bench.cpp           # 性能测试
-    ├── oms_demo.cpp            # 使用示例
+    ├── oms_demo.cpp            # ⚠ 目前与 oms_bench.cpp 逐字节相同 (待办 D1)
+    ├── oms_test.cpp            # 功能/边界/并发断言集
     └── oms_shm.sh              # 一站式运维脚本
 

@@ -195,8 +195,13 @@ struct alignas(64) OmsShmHeader {
     std::atomic<uint64_t> total_key_sync_failures;    // key 变更时索引插入失败 (保持旧 key 不变)
     // 注: total_alloc_failures = total_alloc_exhausted + (索引插入失败次数)
 
+    // v4.1 新增 —— 同样落在保留 pad 里, 不需要再 bump kVersion (旧文件读出 0 = 从未发生)。
+    std::atomic<uint64_t> total_alias_insert_failures; // 主索引 OK 但 clientOrderId/orderId 别名插入失败
+    // 注: 这条**不计入** total_alloc_failures —— 单确实进了 SHM (按 orderSysId 查得到),
+    //     丢的只是别名。但策略侧按 clientOrderId 查活单会落空, 所以必须能被 doctor 发现。
+
     // 填充到 4 KB, 剩余保留将来扩展
-    char pad[4096 - 112 - 24];
+    char pad[4096 - 112 - 32];
 };
 static_assert(sizeof(OmsShmHeader) == 4096, "OmsShmHeader must be 4 KB");
 
@@ -213,8 +218,10 @@ static_assert(sizeof(IndexEntry) == 32, "IndexEntry must be 32 bytes");
 
 // =============================================================================
 // OmsSlot (每单一条, 1024 字节)
-//   RCommand 本身 ~656B, 加 seqlock + 时间戳 + 3 个 key 副本 ≈ 848B, pad 到 1024。
+//   头部 232B (seqlock 8 + state 4 + pad 4 + 3 个时间戳 24 + 3 个 key 副本 192)
+//   + RCommand 536B = 768B, 再 pad 到 1024。
 //   1024 = 16 cachelines, seqlock + state 落头 cacheline, order body 后续 cachelines。
+//   ★ 实际大小用下面的 static_assert 钉住, 别按这段注释估算容量。
 // =============================================================================
 constexpr size_t kSlotSize = 1024;
 
@@ -364,7 +371,7 @@ inline uint32_t index_probe_find(IndexEntry* idx_arr, uint32_t cap,
 // SHM 内存布局辅助
 //
 // [OmsShmHeader (4 KB)]
-// [Slot 数组: capacity * 512 B]
+// [Slot 数组: slot_capacity * 1024 B]      (kSlotSize, 不是 512)
 // [Index 数组 × IDX_COUNT: index_capacity * 32 B each]
 // =============================================================================
 struct OmsShmLayout {
@@ -624,11 +631,16 @@ public:
     }
 
     // 遍历所有 LIVE / FINISHED (慢, O(N), 只用于 snapshot / 对账, 别在 hot path 调)
-    size_t iterate_live(const std::function<void(const pubsub::RCommand&)>& cb) const {
-        return iterate_state(SLOT_LIVE, cb);
+    //   ★ 对账调用方**必须**传 skipped_out (A2): read_slot_snapshot 在"写者忙满 16 次重试"
+    //     或"slot 刚好被 reclaim"时会失败并跳过该 slot。旧实现只返回成功条数, 跳过多少
+    //     完全看不见 —— 对账会把活单当不存在, 且没有任何提示。传了就能发现并重试。
+    size_t iterate_live(const std::function<void(const pubsub::RCommand&)>& cb,
+                        size_t* skipped_out = nullptr) const {
+        return iterate_state(SLOT_LIVE, cb, skipped_out);
     }
-    size_t iterate_finished(const std::function<void(const pubsub::RCommand&)>& cb) const {
-        return iterate_state(SLOT_FINISHED, cb);
+    size_t iterate_finished(const std::function<void(const pubsub::RCommand&)>& cb,
+                            size_t* skipped_out = nullptr) const {
+        return iterate_state(SLOT_FINISHED, cb, skipped_out);
     }
 
     // 便捷: 查存不存在, 不需要拿 order 内容
@@ -690,9 +702,14 @@ protected:
         return true;
     }
 
+    // 返回成功回调的条数; *skipped_out (非空时) = 因为快照拿不到而**跳过**的条数。
+    //   ★ 跳过 ≠ 不存在: 该 slot 的 state 确实是 want_state, 只是这一瞬间读不干净。
+    //     对账场景拿到 skipped > 0 必须重试或告警, 不能当成"这条单不存在"。
     size_t iterate_state(uint32_t want_state,
-                         const std::function<void(const pubsub::RCommand&)>& cb) const {
-        size_t n = 0;
+                         const std::function<void(const pubsub::RCommand&)>& cb,
+                         size_t* skipped_out = nullptr) const {
+        if (skipped_out) *skipped_out = 0;
+        size_t n = 0, skipped = 0;
         uint32_t cap = slot_capacity();
         ReadSnapshot snap;
         for (uint32_t i = 0; i < cap; ++i) {
@@ -701,8 +718,11 @@ protected:
             if (read_slot_snapshot(i, snap)) {
                 cb(snap.order);
                 ++n;
+            } else {
+                ++skipped;   // 写者忙 / 刚好被 reclaim —— 必须让调用方看见 (A2)
             }
         }
+        if (skipped_out) *skipped_out = skipped;
         return n;
     }
 
@@ -719,6 +739,9 @@ public:
         //   total_alloc_slowpath 是"快路径落空但被全表扫救回来"的次数, **不计入失败**。
         uint64_t total_alloc_slowpath = 0, total_alloc_exhausted = 0;
         uint64_t total_key_sync_failures = 0;
+        // ★ 别名索引 (clientOrderId / orderId) 插入失败次数 (B4)。
+        //   单进了 SHM (orderSysId 查得到), 但该别名查不到 —— 不计入 total_alloc_failures。
+        uint64_t total_alias_insert_failures = 0;
         uint64_t min_reclaim_age_ns = 0, max_live_stale_ns = 0;
 
         // ★ 索引占用 (每个索引一套)。
@@ -783,6 +806,7 @@ public:
         s.total_alloc_slowpath      = header()->total_alloc_slowpath.load(std::memory_order_relaxed);
         s.total_alloc_exhausted     = header()->total_alloc_exhausted.load(std::memory_order_relaxed);
         s.total_key_sync_failures   = header()->total_key_sync_failures.load(std::memory_order_relaxed);
+        s.total_alias_insert_failures = header()->total_alias_insert_failures.load(std::memory_order_relaxed);
         s.min_reclaim_age_ns        = header()->min_reclaim_age_ns;
         s.max_live_stale_ns         = header()->max_live_stale_ns;
         return s;
@@ -918,6 +942,7 @@ public:
         header()->total_alloc_slowpath.store(0);
         header()->total_alloc_exhausted.store(0);
         header()->total_key_sync_failures.store(0);
+        header()->total_alias_insert_failures.store(0);
     }
 
     // 主接口: upsert 一条订单
@@ -1016,6 +1041,10 @@ private:
     // ★ 扫满 n 个还没找到就返回 kInvalidSlot, **不重置 hint** (每步都已经 fetch_add 过了)。
     uint32_t alloc_slot_scan(uint32_t n) {
         uint32_t cap = slot_capacity();
+        // ★ cap == 0 必须挡住: 下面 `mask = cap - 1` 会得到 0xFFFFFFFF 且 `pow2` 判为 true,
+        //   于是 `h & mask` 直接当 idx 用 → 越界访问 slots[]。走 `h % cap` 那条则除零。
+        //   正常路径下 cap >= 1 (open() 已保证), 这里是防御性短路。
+        if (cap == 0) return kInvalidSlot;
         uint32_t mask = cap - 1;
         bool pow2 = (cap & (cap - 1)) == 0;
         uint64_t now = now_ns();
@@ -1343,15 +1372,30 @@ private:
         }
         if (s.clientOrderId[0]) {
             if (!insert_index(IDX_CLIENT_ORDER, s.clientOrderId, idx)) {
-                std::fprintf(stderr, "[OmsShm][WARN] clientOrderId alias insert full slot=%u\n", idx);
+                report_alias_insert_failure(IDX_CLIENT_ORDER, idx, s.clientOrderId);
             }
         }
         if (s.orderId[0]) {
             if (!insert_index(IDX_EXCHANGE_ID, s.orderId, idx)) {
-                std::fprintf(stderr, "[OmsShm][WARN] orderId alias insert full slot=%u\n", idx);
+                report_alias_insert_failure(IDX_EXCHANGE_ID, idx, s.orderId);
             }
         }
         return true;
+    }
+
+    // 别名索引插入失败 (B4): 主索引已成功 → 这张单**在 SHM 里**, 但用该别名查不到。
+    //   后果是真实的: 策略侧按 clientOrderId 查活单会落空 (漏撤单 / 重复下单)。
+    //   旧实现只有一行不限流的 fprintf —— 环满时每单一条 = 刷屏, 且 doctor 看不见。
+    //   现在计入 total_alias_insert_failures (doctor 能发现) 并限流。
+    void report_alias_insert_failure(IndexKind kind, uint32_t idx, const char* key) {
+        const uint64_t n =
+            header()->total_alias_insert_failures.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (n <= 8 || (n % 4096) == 0) {
+            std::fprintf(stderr,
+                "[OmsShm][WARN] %s 别名索引插入失败 slot=%u key=\"%s\" (累计 %llu 次)\n"
+                "  主索引 orderSysId 正常 → 这张单在 SHM 里, 但用该别名查不到\n",
+                index_kind_name(kind), idx, key, (unsigned long long)n);
+        }
     }
 
     bool insert_index(IndexKind kind, std::string_view key, uint32_t slot_idx) {
