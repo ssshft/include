@@ -587,8 +587,11 @@ bool OrderManager::onOrderUpdate(pubsub::RCommand& rcmd) {
     // 6) REJECTED 保留错误信息
     if (rcmd.body.orderResponse.orderStatus == OS_REJECTED) {
         cur.body.orderResponse.errorId = rcmd.body.orderResponse.errorId;
-        std::strncpy(cur.body.orderResponse.originMsg,
-                     rcmd.body.orderResponse.originMsg, ORIGINMSG_SIZE);
+        // ⚠ 别用 ORIGINMSG_SIZE (=256): originMsg 是 char[128], strncpy 会按 n 补 NUL,
+        //   越界写 128 字节并把紧随其后的 updateTime / apiSourceEnum 清零。
+        std::snprintf(cur.body.orderResponse.originMsg,
+                      sizeof(cur.body.orderResponse.originMsg),
+                      "%s", rcmd.body.orderResponse.originMsg);
     }
 
     // === 原子写回 ===
@@ -653,22 +656,20 @@ public:
     }
 };
 
-getOrderSysId (辅助函数) 改成:
+getOrderSysId (辅助函数) 改成:  ★ 三态, 并且**直接吐出完整报单体** (见 §12.8)
 
-bool OrderManager::getOrderSysId(int64_t cid, const char* strategyId,
-                                  char* orderSysId_out, const char* orderId) {
-    pubsub::RCommand out;
-    if (shm_.lookup_by_client(strategyId, cid, out)) {
-        std::strncpy(orderSysId_out, out.body.orderResponse.orderSysId, ORDER_SIZE);
-        return true;
-    }
+oms::shm::OmsShmSegment::LookupStatus
+OrderManager::getOrderSysId(int64_t cid, const char* strategyId,
+                            pubsub::RCommand& out, const char* orderId) {
+    // 一次 lookup 就同时拿到 orderSysId 和整张报单体 —— 老代码要查两次
+    // (client key→sysId, sysId→报单体), 因为老的第一张表**只存字符串**。
+    auto ls = shm_.lookup_by_client_ex(strategyId, cid, out);
+    if (ls == LookupStatus::OK) return ls;
     if (orderId && orderId[0]) {
-        if (shm_.lookup_by_orderId(orderId, out)) {
-            std::strncpy(orderSysId_out, out.body.orderResponse.orderSysId, ORDER_SIZE);
-            return true;
-        }
+        ls = shm_.lookup_by_orderId_ex(orderId, out);
+        if (ls == LookupStatus::OK) return ls;
     }
-    return false;
+    return ls;      // ★ 返回三态而不是 bool: BUSY 不等于 NOT_FOUND
 }
 
 processTcmd 里的 orderSysId2OrderResponseMap[orderSysId] = rcmd 变 shm_.upsert(rcmd); (三个索引自动落地)。
@@ -1032,12 +1033,154 @@ MIXED    reader in parallel: 3-5M lookups/sec/thread
 
 
 
-十二、文件清单
+十二、接入 tb/OrderManager (已落地)
+
+tb 的 `om::OrderManager` 原先用三张 `tbb::concurrent_unordered_map` 缓存在途订单:
+
+    clientOrderId2OrderSysIdMap   // fmt::format("{}{}", strategyId, cid) → orderSysId
+    orderId2OrderSysIdMap         // 交易所 orderId → orderSysId
+    orderSysId2OrderResponseMap   // orderSysId → pubsub::RCommand
+
+这三张表现在合并成**一个 OmsShm 段** (`oms::shm::OmsShmWriter`), 报单体存 slot,
+三张 hash 索引指向 slot。
+
+12.1 API 映射
+
+    老写法                                          新写法
+    ----------------------------------------------  ------------------------------------------------
+    map[sysid] = rcmd;                              omsShm_.upsert(rcmd);      // 一次建三样
+    map.find(sysid) → iter->second                  查: lookup_by_orderSysId_ex(sysid, out)
+    原地改 iter->second, 靠引用生效                  改副本 out, 然后 upsert(out) 写回 (必须!)
+    clientOrderId2OrderSysIdMap.find(...)            lookup_by_client_ex(strategyId, cid, out)
+    orderId2OrderSysIdMap.find(orderId)              lookup_by_orderId_ex(orderId, out)
+    getOrderSysId: 先查表1拿 sysId, 再查表2         getOrderSysId: **一次** lookup 直接吐报单体
+                    (两张表, 两次查询)                (三张索引指向同一个 slot, 见 §12.8)
+
+复合 client key 的拼法两版完全一致 —— `compose_client_key()` 当初就是照
+`fmt::format("{}{}", strategyId, clientOrderId)` 写的。
+
+★ 最容易写错的一条: 老代码拿的是 map 里 value 的**引用**, 改动是原地生效的 —— 包括那些
+  `return false` 的分支 (tradeDiff/fillPrice 归零、orderId 补写、errorId 落库)。
+  换成 OmsShm 之后 `op` 是 lookup 出来的**副本**, 所以**每一个 return 之前都要 upsert 写回**,
+  否则行为就与老代码不一致 (静默丢更新)。
+
+12.2 单写者前提
+
+`OmsShmWriter` 的契约是**单线程串行调用**。tb 侧满足这个前提:
+`TbOperation::run()` 起两个线程, 但只有 `execute()` 这一个线程会碰 OrderManager
+(`processTcmd` / `processRcmd` 都在它的 while 循环里串行调用); 另一个 `executeTcmd()`
+只负责把 tcmd 派发给 trade client。
+
+⚠ 如果将来把 tcmd 和 rcmd 拆到两个线程, **必须**在 OrderManager 里加锁, 否则会破坏
+  `next_slot_hint` 和 slot 状态机。
+
+12.3 配置与容量规划
+
+`om::OmsShmConfig` (定义在 `tb/include/oms/OrderManager.h`):
+
+    path               = "/dev/shm/tb_oms.dat"
+    slot_capacity      = 100000
+    min_reclaim_age_ns = 60s     // FINISHED 多久后可回收
+    max_live_stale_ns  = 24h     // LIVE 僵尸兜底
+
+**可持续写入速率上限 = slot_capacity / min_reclaim_age** (见 §七)。默认值只有
+**约 1666 单/秒**; 超过就必然写满。tb 启动时会把这行打进日志:
+
+    oms shm ready: path=... slot_cap=... sustainable_insert_rate=1666/s
+
+12.4 与老实现的行为差异 (三条, 都是有意的)
+
+(1) **环写满时新单被拒**。老代码的 map 无上限, `processTcmd(CMD_NEW_ORDER)` 永远返回 true;
+    现在 `upsert` 失败会返回 **false**, `TbOperation` 因此**不会**把这张单发给交易所。
+    取舍: 宁可不下单, 也不发一张 OMS 不认识的单 (那种单之后撤不掉、查不到)。
+    日志已限流 (前 8 次 + 之后每 4096 次), 不会刷屏。
+
+(2) **已回收的单查不到**。`min_reclaim_age` 到期后 FINISHED 的 slot 会被复用, 之后拿
+    旧 clientOrderId/orderId 来撤单/查询会得到 `NOT_FOUND` → `OS_REJECTED` +
+    `OMSOrderNotFoundError`。老实现永远查得到。**这个 TTL 必须按"上层最晚可能来撤单的时长"定。**
+
+(3) **重启后订单还在** (新能力, 不是差异而是收益)。老实现是进程内 map, tb 重启即全丢,
+    重启后撤单会报 `OMSOrderNotFoundError`; 现在重新 open 同一路径即可恢复
+    (open 时还会 `recover_orphan_slots()` 清理上次崩溃留下的 RECLAIMING 槽)。
+
+12.5 已知待办
+
+`OS_FAILED` (撤单失败) 那条分支里, 老代码只把 `OS_FAILED` 写进**发出去的回复**, 不写回
+存储 —— 所以 slot 里的状态仍是 `OS_PENDING_NEW` (= LIVE)。老实现无所谓, 但在 OmsShm 里
+这意味着这个 slot 要等 `max_live_stale_ns` 才能回收。
+**建议把 `max_live_stale_ns` 从 24h 调到 10~30 分钟** (卡单/僵尸单本来就该很快判死)。
+若要更彻底, 可以在那条分支里把 `OS_FAILED` 一并写回 slot —— 但那会改变存储状态的可见性
+(策略可见的行为不变), 属于独立决策, 未做。
+
+12.6 验证方式
+
+`OrderManager` 的新旧两版用**同一份差分驱动**回放同一脚本, 把返回值 + 每次推给策略的
+RCommand 打成规范化轨迹 (orderSysId 按首次出现顺序映射成 S1/S2..., updateTime 不打印):
+
+    场景 A (正常生命周期/撤单/查询/部分成交/拒绝/失败/超量/只靠 orderId 反查/C_SWAP 成交算术)
+      老版 vs 新版: **93 行轨迹逐字节相同**
+    场景 B (22 字符 strategyId): 两版**不同** —— 见 §12.7
+    场景 C (capacity=64 灌 70 张 LIVE 单): 成功 64 / 被拒 6, 被拒的没发给交易所
+    场景 D (min_reclaim_age=0): 灌满后已 FINISHED 的单被回收 → 撤单 NOT_FOUND
+    场景 E (重新 open 同一路径): created_new=0, 重启前建的活单仍可撤
+
+12.7 顺带修掉的老 bug: orderSysId 被截断
+
+`getOrderSysId(cid, strategyId, out, orderId)` 里老代码写的是
+`strncpy(orderSysId, ..., INSTID_SIZE)` —— `INSTID_SIZE` 是 **32**, 而 orderSysId 是
+`char[64]`、值形如 `x-<strategyId><rdtsc>`。strategyId 超过约 13 个字符时就会**被截断**,
+调用方随后拿这个截断值去查报单体必然查不到, 于是走进 "oms not found order response" 分支 ——
+撤单回复里成交量/orderId 全是 0, 缓存状态整个丢掉。
+
+差分场景 B 实测 (strategyId = `utrade_btc_strategy_001`, orderSysId 长 41 字节):
+
+    老版 B03 CANCEL:  sysid=S2(截断后的新串)  oid=(空)  volTot=0.0000   ← 缓存丢了
+    新版 B03 CANCEL:  sysid=S1              oid=EX-B1 volTot=1.0000   ← 正确
+
+已改成 `ORDER_SIZE` (64, 与调用方缓冲区一致)。
+
+12.8 `getOrderSysId` 的两次查询合并成一次 (以及一个 `strncpy` 越界陷阱)
+
+**为什么老代码要查两次**: 它是两张表 ——
+`clientOrderId2OrderSysIdMap[key]` **只存 orderSysId 字符串**, 报单体在
+`orderSysId2OrderResponseMap[sysId]` 里, 所以必须再查一次。
+
+**OmsShm 下第二次是多余的**: 三张索引都指向**同一个 slot**, slot 里就是完整 `RCommand`。
+`lookup_by_client_ex(strategyId, cid, out)` 已经把整张报单体通过 `out` 返回了。
+`sizeof(pubsub::RCommand) = 536 B` —— 每次 lookup 都是 hash + probe + 536 字节 memcpy,
+一次撤单/查询原本要做两遍。
+
+`getOrderSysId` 因此改成**三态 + 直接吐出报单体**, 两个调用点 (CANCEL / QUERY) 合并成
+一次查询 + 一套三态处理。`BUSY` 不再被压成 `false` —— 老写法会把一张**活单**回成
+`OS_REJECTED` + `OMSOrderNotFoundError` (就是 §12.4 的 B3, 只是发生在撤单入口)。
+
+⚠ **`ORIGINMSG_SIZE` 是个坑, 别用**。它是 **256**, 而 `OrderResponse::originMsg` 是
+`char[128]`。`strncpy(dst, src, n)` 会**按 n 补 NUL** —— 也就是**无条件写满 256 字节**,
+与 `src` 多长无关:
+
+    originMsg        offset 384, 128 字节 → 到 512 结束
+    updateTime       offset 512          ← 被覆盖
+    apiSourceEnum    offset 520          ← 被覆盖
+    sizeof(OrderResponse) = 528, 而写入区间是 [384, 640)
+
+结果是把**同一个分支里刚设好的** `updateTime` / `apiSourceEnum` 清零, 并溢出结构体 112 字节
+(实测 `updateTime` 1234567890123456 → 0)。正确写法是让边界跟着字段走:
+
+    std::snprintf(dst, sizeof(dst), "%s", src);      // 永远截断 + 永远补 NUL
+
+**同一写法在 Gateio 还有 4 处** (`GateioSpotTrade.cpp:737/747/887`,
+`GateioUSTrade.cpp:1076`), 都是把交易所错误原文写进 `char[128]`, 尚未修。
+
+十三、文件清单
 
 new_dev/
 ├── include/oms/
 │   ├── OmsShm.h                # 核心 header (writer + reader + 布局)
 │   └── README.md               # 本文档
+├── tb/include/oms/
+│   └── OrderManager.h          # 接入方: OmsShmConfig + OmsShmWriter 成员
+├── tb/src/oms/
+│   └── OrderManager.cpp        # 接入方: 三张 tbb map 已换成一次 upsert
 └── tb/tools/
     ├── oms_query.cpp           # CLI 查询
     ├── oms_bench.cpp           # 性能测试
