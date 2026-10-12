@@ -198,14 +198,14 @@ public:
 
         // 三种模式只在这一段有差别。
         if (mode == OpenMode::CreateOnly || mode == OpenMode::OpenOrCreate) {
-            fd = ::shm_open(name, O_RDWR | O_CREAT | O_EXCL, permissions);
+            fd = ::shm_open(name.c_str(), O_RDWR | O_CREAT | O_EXCL, permissions);
             if (fd >= 0) {
                 created = true;
             } else if (errno == EEXIST && mode == OpenMode::OpenOrCreate) {
-                fd = ::shm_open(name, O_RDWR, permissions);
+                fd = ::shm_open(name.c_str(), O_RDWR, permissions);
             }
         } else {
-            fd = ::shm_open(name, O_RDWR, permissions);
+            fd = ::shm_open(name.c_str(), O_RDWR, permissions);
         }
 
         if (fd < 0) {
