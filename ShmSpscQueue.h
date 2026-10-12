@@ -179,7 +179,7 @@ public:
     //
     // 真正必要的操作只有四步：shm_open -> flock -> （创建者 ftruncate+mmap+写 header
     // / joiner fstat+mmap+校验 header）-> unlock。剩下的都是失败清理。
-    bool open(const char* name, OpenMode mode, Error* err = nullptr, mode_t permissions = 0600) noexcept {
+    bool open(const std::string& file, OpenMode mode, Error* err = nullptr, mode_t permissions = 0600) noexcept {
         close();
 
         auto fail = [&](int e, const char* msg) noexcept -> bool {
@@ -188,9 +188,9 @@ public:
             return false;
         };
 
-        if (!shm_queue::validName(name)) {
-            if (err) err->setMessage(EINVAL, shm_queue::kMsgBadName);
-            return false;
+        std::string name = file;
+        if (file[0] != '/') {
+            name = "/" + file;
         }
 
         bool created = false;
@@ -409,12 +409,13 @@ public:
     // 删除共享内存对象。只在"所有进程都已停止使用"的协调关闭 / 恢复流程里调用。
     // 没有 reset()：把 head/tail 归零需要保证双方都不在运行，flock 无法表达。
     // ENOENT 视为成功（幂等），与 ShmSpmcQueue 一致。
-    static bool unlinkName(const char* name, Error* err = nullptr) noexcept {
-        if (!shm_queue::validName(name)) {
-            if (err) err->setMessage(EINVAL, shm_queue::kMsgBadName);
-            return false;
+    static bool unlinkName(const std::string& file, Error* err = nullptr) noexcept {
+        std::string name = file;
+        if (file[0] != '/') {
+            name = "/" + file;
         }
-        if (::shm_unlink(name) != 0) {
+
+        if (::shm_unlink(name.c_str()) != 0) {
             if (errno == ENOENT) return true;
             if (err) err->set(errno, "shm_unlink failed");
             return false;

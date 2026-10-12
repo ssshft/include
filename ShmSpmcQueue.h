@@ -234,12 +234,13 @@ public:
     // 同名对象已存在但布局不匹配会抛；size 为 0（创建者在 ftruncate 前被 SIGKILL）
     // 会立刻抛出提示 unlinkName() 的异常，需要人工清理。
     // 失败抛 std::invalid_argument（名字非法）/ std::runtime_error（系统调用或布局不匹配）。
-    static ShmSpmcQueue openOrCreate(const std::string& name,
+    static ShmSpmcQueue openOrCreate(const std::string& file,
                                      Start start = Start::AfterLatest,
                                      OpenMode open_mode = OpenMode::OpenOrCreate,
                                      mode_t permissions = 0660) {
-        if (!shm_queue::validName(name)) {
-            throw std::invalid_argument(shm_queue::badNameMessage(name));
+        std::string name = file;
+        if (file[0] != '/') {
+            name = "/" + file;
         }
 
         bool creator = false;
@@ -413,11 +414,12 @@ public:
     // 删除同名共享内存对象。只在"所有进程都已停止使用"的协调关闭 / 恢复流程里调用。
     // 这是唯一的重置手段：把 published_seq 归零需要保证所有读者都已停止，
     // 而这个约束无法用 flock 表达（读者不持锁）。ENOENT 视为成功（幂等）。
-    static void unlinkName(const std::string& name) {
-        if (!shm_queue::validName(name)) {
-            throw std::invalid_argument(shm_queue::badNameMessage(name));
+    static void unlinkName(const std::string& file) {
+        std::string name = file;
+        if (file[0] != '/') {
+            name = "/" + file;
         }
-
+        
         if (::shm_unlink(name.c_str()) != 0 && errno != ENOENT) {
             throw shm_queue::systemError("shm_unlink");
         }
@@ -545,9 +547,6 @@ public:
 
         return {ReadStatus::Contended};
     }
-
-    // popLatest 的别名（"取最后一条" / "取最新一条" 两种叫法指的是同一件事）。
-    ReadResult popLast(T& out) noexcept { return popLatest(out); }
 
     // 便捷形式：只关心"这次有没有拿到新消息"。
     // false 同时覆盖 Empty 与 Contended；需要区分时用 popLatest()。
