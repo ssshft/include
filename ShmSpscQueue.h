@@ -234,7 +234,7 @@ public:
                 if (fd >= 0) ::close(fd);
                 if (created && !formed) ::shm_unlink(name);
             }
-        } cleanup{fd, created, name};
+        } cleanup{fd, created, name.c_str()};
 
         // 带超时的非阻塞 flock：串行化初始化与校验，也顺便让 joiner 不会看到
         // 一个半初始化的对象（阻塞式 flock 在持锁方卡住时会永久挂起）。
