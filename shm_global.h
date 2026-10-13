@@ -56,7 +56,7 @@ typedef ShmSpmcQueue<md::Depth10, 1024*128> Depth10Spmc;
 typedef ShmSpmcQueue<md::Depth20, 1024*128> Depth20Spmc;
 typedef ShmSpmcQueue<md::Trades, 1024*128> TradesSpmc;
 typedef ShmSpmcQueue<md::Kline, 1024*128> KlineSpmc;
-typedef ShmSpmcQueue<md::FundingRate, 1024*128> FundingRateSpmc;
+typedef ShmSpmcQueue<md::FundingRate, 1024*32> FundingRateSpmc;
 
 
 // ── 载荷约束（与队列头文件里的 static_assert 同源）──────────────────────
