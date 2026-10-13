@@ -76,4 +76,9 @@ namespace crypto {
         const std::string& instType = InstTypeEnum2StrMap[instTypeEnum];
         return get_instrumentInfo_channel_key(exchId, instType, instId);
     }
+
+    inline std::string get_strategy_shm(const std::string& shmStr, const std::string& strategyId){
+        std::string key = fmt::format("{}_{}", shmStr, strategyId);
+        return key;
+    }
 }

@@ -155,7 +155,7 @@ public:
     // 一句声明就打开，失败抛 std::runtime_error（文本即 Error.message）。
     // 要"失败不抛"仍然用 open()。
     // mode 默认 OpenOrCreate；传 OpenOnly 可避免"造出一条没人写的队列"。
-    explicit ShmSpscQueue(const char* name, OpenMode mode = OpenMode::OpenOrCreate, mode_t permissions = 0660) {
+    explicit ShmSpscQueue(const std::string& name, OpenMode mode = OpenMode::OpenOrCreate, mode_t permissions = 0660) {
         Error err{};
         if (!open(name, mode, &err, permissions)) {
             throw std::runtime_error(err.message);
@@ -382,6 +382,10 @@ public:
         out = q->slots[t & Layout::kMask];
         q->tail.store(t + 1, std::memory_order_release);
         return QueueStatus::Ok;
+    }
+
+    bool tryPop(T& out) noexcept {
+        return pop(out) == QueueStatus::Ok;
     }
 
     // 消费者空转退避。step 由调用方持有，读到 Empty 时调用一次。

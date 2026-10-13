@@ -419,7 +419,7 @@ public:
         if (file[0] != '/') {
             name = "/" + file;
         }
-        
+
         if (::shm_unlink(name.c_str()) != 0 && errno != ENOENT) {
             throw shm_queue::systemError("shm_unlink");
         }
@@ -488,6 +488,10 @@ public:
     // 建议循环：Message -> 立即再调一次；Gap -> 记录 lost + 对齐；Empty / Contended -> backoff。
     ReadResult pop(T& out) noexcept {
         return readAtCursor(out, 0);
+    }
+
+    bool tryPop(T& out) noexcept {
+        return pop(out).status == ReadStatus::Message;
     }
 
     // 只取最新：把游标直接推到 published_seq，再走一次逐条读。
