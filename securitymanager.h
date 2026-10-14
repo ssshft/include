@@ -207,6 +207,11 @@ namespace sm {
             return get_instrument_info(ExchangeTypeEnum2StrMap[exchId].c_str(), InstTypeEnum2StrMap[instType].c_str(), instId, info);
         }
 
+        inline bool get_instrument_info(ExchangeType exchId, InstType instType, std::string_view instId, md::InstrumentInfo& info) {
+            return get_instrument_info(ExchangeTypeEnum2StrMap[exchId].c_str(), InstTypeEnum2StrMap[instType].c_str(), instId, info);
+        }
+
+
     private:
         // 在**本地临时 map** 上全量重建, 建完后一次 atomic_store 交换指针。
         // 读侧不会因为 refresh 而变慢。

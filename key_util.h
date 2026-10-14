@@ -67,8 +67,7 @@ namespace crypto {
     }
 
     inline std::string get_instrumentInfo_channel_key(const std::string& exchId, const std::string& instType, const std::string& instId) {
-        const std::string& key = fmt::format("{}.{}.{}.INSTRUMENT_INFO", exchId, instType, instId);
-        return key;
+        return fmt::format("{}.{}.{}.INSTRUMENT_INFO", exchId, instType, instId);
     }
 
     inline std::string get_instrumentInfo_channel_key(ExchangeType exchangeTypeEnum, InstType instTypeEnum, const std::string& instId) {
@@ -78,7 +77,6 @@ namespace crypto {
     }
 
     inline std::string get_strategy_shm(const std::string& shmStr, const std::string& strategyId){
-        std::string key = fmt::format("{}_{}", shmStr, strategyId);
-        return key;
+        return fmt::format("{}_{}", shmStr, strategyId);
     }
 }
