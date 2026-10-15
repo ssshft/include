@@ -20,6 +20,7 @@ namespace pubsub {
         CMD_RPT_BALANCE,
         CMD_RPT_POSITION,
         CMD_RPT_ORDER_RESPONSE,
+        CMD_RPT_TRADE,
         CMD_TYPE_MAX
     };
 
@@ -39,6 +40,7 @@ namespace pubsub {
         {CMD_RPT_BALANCE, "CMD_RPT_BALANCE"},
         {CMD_RPT_POSITION, "CMD_RPT_POSITION"},
         {CMD_RPT_ORDER_RESPONSE, "CMD_RPT_ORDER_RESPONSE"},
+        {CMD_RPT_TRADE, "CMD_RPT_TRADE"},
 	    {CMD_TYPE_MAX, "CMD_TYPE_MAX"}
     };
 
@@ -58,6 +60,7 @@ namespace pubsub {
         {"CMD_RPT_BALANCE", CMD_RPT_BALANCE},
         {"CMD_RPT_POSITION", CMD_RPT_POSITION},
         {"CMD_RPT_ORDER_RESPONSE", CMD_RPT_ORDER_RESPONSE},
+        {"CMD_RPT_TRADE", CMD_RPT_TRADE},
         {"CMD_TYPE_MAX", CMD_TYPE_MAX}
     };
 
@@ -202,6 +205,7 @@ namespace pubsub {
         double tradePrice;
         double tradeDiff; // 本次成交量
         double fillPrice; // 本次成交价
+        double tradeSum;  // 成交推送中，每次成交量累加。
         bool reduceOnly;
 
         int errorId;
@@ -210,15 +214,16 @@ namespace pubsub {
 
         ApiSource apiSourceEnum;
         
+
         std::string getString() const {
             const std::string& s = fmt::format("[OrderResponse] exchangeTypeEnum:{}, instTypeEnum:{}, accountId:{}, accountName:{}, strategyId:{}, "
                                 "instId:{}, clientOrderId:{}, orderSysId:{}, orderId:{}, strategyRef:{}, offsetFlag:{}, direction:{}, "
                                 "orderType:{}, orderStatus:{}, volumeTotal:{}, limitPrice:{}, volumeTraded:{}, "
-                                "tradePrice:{}, errorId:{}, originMsg:{}, updateTime:{}, apiSourceEnum:{}",
+                                "tradePrice:{}, tradeDiff:{}, fillPrice:{}, tradeSum:{}, errorId:{}, originMsg:{}, updateTime:{}, apiSourceEnum:{}",
                                 ExchangeTypeEnum2StrMap[exchangeTypeEnum], InstTypeEnum2StrMap[instTypeEnum], accountId, accountName, strategyId,
                                 instId, clientOrderId, orderSysId, orderId, strategyRef, OffsetFlagEnum2StrMap[offsetFlag], DirectionEnum2StrMap[direction],
                                 OrderTypeEnum2StrMap[orderType], OrderStatusEnum2StrMap[orderStatus], volumeTotal, limitPrice, volumeTraded, 
-                                tradePrice, errorId, originMsg, updateTime, ApiSourceEnum2StrMap[apiSourceEnum]);
+                                tradePrice, tradeDiff, fillPrice, tradeSum, errorId, originMsg, updateTime, ApiSourceEnum2StrMap[apiSourceEnum]);
             return s;
         }
     };
@@ -357,7 +362,7 @@ namespace pubsub {
         
         std::string getString() const {
             std::string ret = fmt::format("[{}]", CommandTypeEnum2StrMap[cmdTypeEnum]);
-            if (cmdTypeEnum == CMD_RPT_ORDER_RESPONSE || cmdTypeEnum == CMD_RPT_NEW_ORDER || cmdTypeEnum == CMD_RPT_CANCEL_ORDER || cmdTypeEnum == CMD_RPT_QUERY_ORDER) {
+            if (cmdTypeEnum == CMD_RPT_ORDER_RESPONSE || cmdTypeEnum == CMD_RPT_NEW_ORDER || cmdTypeEnum == CMD_RPT_CANCEL_ORDER || cmdTypeEnum == CMD_RPT_QUERY_ORDER || cmdTypeEnum == CMD_RPT_TRADE) {
                 ret.append(body.orderResponse.getString());
             }
             else if (cmdTypeEnum == CMD_RPT_BALANCE) {

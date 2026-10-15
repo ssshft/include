@@ -55,8 +55,15 @@ namespace shm {
 // =============================================================================
 
 constexpr uint32_t kMagic          = 0x4F4D5352;   // 'OMSR' little-endian
-constexpr uint32_t kVersion        = 3;            // v2: 加 last_update_time_ns + max_live_stale_ns
+constexpr uint32_t kVersion        = 4;            // v2: 加 last_update_time_ns + max_live_stale_ns
                                                    // v3: index_capacity 由 2N 改成 next_pow2(4N)
+                                                   // v4: pubsub::RCommand 536 -> 544
+                                                   //     (OrderResponse 新增 `tradeSum`, 成交通道融合游标)
+                                                   //     ★ 注意: slot 内字段偏移变了, 但**段大小没变**
+                                                   //       —— kSlotSize 仍是 1024, `_pad1` 会自动缩 8 字节。
+                                                   //       所以 size 校验拦不住旧段, **必须**靠本 version
+                                                   //       让 open() 响亮报错 (见 :523-526), 否则旧段会
+                                                   //       被按新布局静默错读 (orderSysId 之后的字段全部错位)。
 constexpr uint32_t kDefaultCapacity = 100'000;     // slot 数
 constexpr uint64_t kDefaultMinReclaimAgeNs   = 60ULL * 1'000'000'000;         // 60s: FINISHED 最小 TTL
 constexpr uint64_t kDefaultMaxLiveStaleNs    = 24ULL * 3600 * 1'000'000'000;  // 24h: LIVE 无更新最长容忍
@@ -227,7 +234,7 @@ static_assert(sizeof(IndexEntry) == 32, "IndexEntry must be 32 bytes");
 // =============================================================================
 // OmsSlot (每单一条, 1024 字节)
 //   头部 232B (seqlock 8 + state 4 + pad 4 + 3 个时间戳 24 + 3 个 key 副本 192)
-//   + RCommand 536B = 768B, 再 pad 到 1024。
+//   + RCommand 544B = 776B, 再 pad 到 1024。   (v4: RCommand 536 -> 544, 见 kVersion)
 //   1024 = 16 cachelines, seqlock + state 落头 cacheline, order body 后续 cachelines。
 //   ★ 实际大小用下面的 static_assert 钉住, 别按这段注释估算容量。
 // =============================================================================
