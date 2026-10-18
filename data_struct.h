@@ -35,9 +35,21 @@ enum ExchangeType{
     GATEIO,
     BYBIT,
     HTX,
-    BITGET
+    BITGET,
+    MEXC,
+    KUCOIN,
+    BINGX,
+    XT,
+    LBANK,
+    COINW,
+    PIONEX
 };
 
+// ⚠️ 这两张表必须与 enum ExchangeType 一一对应。
+// 调用点普遍写成 ExchangeTypeEnum2StrMap[e] (operator[]), key 缺失时**不报错**,
+// 而是插入一个空串 —— 所有 "EXCH.INSTTYPE.INSTID" 复合键、redis key、日志
+// 会静默退化成 ".USDT_SWAP.BTC-USDT" 这种垃圾键, 且不同交易所之间还会互相撞键。
+// 新增交易所时 enum 和这两张表必须同一次提交改完。
 static std::unordered_map<ExchangeType, std::string> ExchangeTypeEnum2StrMap {
     {ExchangeType_MIN, "ExchangeType_MIN"},
     {BINANCE, "BINANCE"},
@@ -45,7 +57,14 @@ static std::unordered_map<ExchangeType, std::string> ExchangeTypeEnum2StrMap {
     {GATEIO, "GATEIO"},
     {BYBIT, "BYBIT"},
     {HTX, "HTX"},
-    {BITGET, "BITGET"}
+    {BITGET, "BITGET"},
+    {MEXC, "MEXC"},
+    {KUCOIN, "KUCOIN"},
+    {BINGX, "BINGX"},
+    {XT, "XT"},
+    {LBANK, "LBANK"},
+    {COINW, "COINW"},
+    {PIONEX, "PIONEX"}
 };
 
 static std::unordered_map<std::string, ExchangeType> ExchangeTypeStr2EnumMap {
@@ -55,7 +74,14 @@ static std::unordered_map<std::string, ExchangeType> ExchangeTypeStr2EnumMap {
     {"GATEIO", GATEIO},
     {"BYBIT", BYBIT},
     {"HTX", HTX},
-    {"BITGET", BITGET}
+    {"BITGET", BITGET},
+    {"MEXC", MEXC},
+    {"KUCOIN", KUCOIN},
+    {"BINGX", BINGX},
+    {"XT", XT},
+    {"LBANK", LBANK},
+    {"COINW", COINW},
+    {"PIONEX", PIONEX}
 };
 
 enum InstType {
