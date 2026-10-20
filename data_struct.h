@@ -42,7 +42,18 @@ enum ExchangeType{
     XT,
     LBANK,
     COINW,
-    PIONEX
+    PIONEX,
+    // 2026-10-20 新增 8 家。
+    // ⚠️ **只能往后追加**：这些值会随 InstrumentInfo 进 SHM / 进 redis 复合键，
+    // 插在中间会让已经在跑的 db/tb 把交易所认错（枚举值对不上名字，且不报错）。
+    BITUNIX,
+    PHEMEX,
+    WEEX,
+    FAMEEX,
+    BLOFIN,
+    HOTCOIN,
+    ECHOBIT,
+    MGBX
 };
 
 // ⚠️ 这两张表必须与 enum ExchangeType 一一对应。
@@ -64,7 +75,15 @@ static std::unordered_map<ExchangeType, std::string> ExchangeTypeEnum2StrMap {
     {XT, "XT"},
     {LBANK, "LBANK"},
     {COINW, "COINW"},
-    {PIONEX, "PIONEX"}
+    {PIONEX, "PIONEX"},
+    {BITUNIX, "BITUNIX"},
+    {PHEMEX, "PHEMEX"},
+    {WEEX, "WEEX"},
+    {FAMEEX, "FAMEEX"},
+    {BLOFIN, "BLOFIN"},
+    {HOTCOIN, "HOTCOIN"},
+    {ECHOBIT, "ECHOBIT"},
+    {MGBX, "MGBX"}
 };
 
 static std::unordered_map<std::string, ExchangeType> ExchangeTypeStr2EnumMap {
@@ -81,7 +100,15 @@ static std::unordered_map<std::string, ExchangeType> ExchangeTypeStr2EnumMap {
     {"XT", XT},
     {"LBANK", LBANK},
     {"COINW", COINW},
-    {"PIONEX", PIONEX}
+    {"PIONEX", PIONEX},
+    {"BITUNIX", BITUNIX},
+    {"PHEMEX", PHEMEX},
+    {"WEEX", WEEX},
+    {"FAMEEX", FAMEEX},
+    {"BLOFIN", BLOFIN},
+    {"HOTCOIN", HOTCOIN},
+    {"ECHOBIT", ECHOBIT},
+    {"MGBX", MGBX}
 };
 
 enum InstType {

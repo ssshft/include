@@ -342,6 +342,12 @@ struct WsConfig {
     int client_ping_interval_sec = 0;
     std::string client_ping_text;
 
+    // 心跳体需要**每次都不一样**时用这个（非空则优先于 client_ping_text）。
+    // 为什么需要：Bitunix 的心跳是 {"op":"ping","ping":<秒级时间戳>}，
+    // 实测把 ping 填 0 服务端**不回 pong**（= 连接被判死，60 s 后断），
+    // 静态字符串表达不了"当前时间"，所以留一个回调由调用方现取。
+    std::function<std::string()> client_ping_builder;
+
     // 多久没收到**任何 frame**(含 PING/PONG) → 重连 (0 = 不检查)。
     // 抓"TCP/网络层死了": ping/pong 也算 frame, 所以这里超时一定意味着连接真挂了。
     int idle_timeout_sec = 60;
@@ -563,8 +569,8 @@ private:
                 throw std::invalid_argument("ClientPeriodicText requires client_ping_interval_sec > 0");
             }
                 
-            if (cfg.client_ping_text.empty()) {
-                throw std::invalid_argument("ClientPeriodicText requires client_ping_text");
+            if (cfg.client_ping_text.empty() && !cfg.client_ping_builder) {
+                throw std::invalid_argument("ClientPeriodicText requires client_ping_text or client_ping_builder");
             }
                 
         }
@@ -922,7 +928,10 @@ private:
                     return;
                 }
 
-                self->queue_write(self->cfg_.client_ping_text, /*binary=*/false);
+                const std::string payload = self->cfg_.client_ping_builder
+                                                ? self->cfg_.client_ping_builder()
+                                                : self->cfg_.client_ping_text;
+                self->queue_write(payload, /*binary=*/false);
                 self->schedule_client_ping();
             });
     }
