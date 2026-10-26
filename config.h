@@ -40,6 +40,8 @@ public:
     }
 
     void load(const char* file) {
+        filePath = (file != nullptr) ? file : "";
+
         std::ifstream ifs(file);
         if (!ifs.is_open()) {
             fprintf(stderr, "Could not open file for reading!\n");
@@ -201,7 +203,14 @@ public:
         return rawStr;
     }
 
+    // 本次 load() 用的文件路径（load 之前是空串）。给"配置文件热更新"用：
+    // 调用方拿它去 stat / 重读，不必自己再维护一份路径。
+    const std::string& get_path() const {
+        return filePath;
+    }
+
 private:
     rapidjson::Document d;  
     std::string rawStr;
+    std::string filePath;
 };

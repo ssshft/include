@@ -14,8 +14,12 @@
 #include <cstdio>
 #include <ctime>
 
+#include "hft_time.h"
+
 namespace crypto {
 
+    // 兼容旧代码：TSC 锚到 REALTIME，每 30s 重同步；
+    // 不要用于新的延时统计。新代码用 hft::time::mono_ns()。
     class TscClock {
     public:
         static TscClock& instance() {
@@ -80,10 +84,7 @@ namespace crypto {
         }
 
         static inline uint64_t rdtsc() {
-            uint32_t lo, hi;
-
-            asm volatile("rdtsc": "=a"(lo), "=d"(hi));
-            return ((uint64_t)hi << 32) | lo;
+            return hft::time::tsc_ticks();
         } 
 
         double ns_per_cycle_{1.0};
@@ -93,8 +94,16 @@ namespace crypto {
         uint64_t sync_interval_{0};
     };
 
+    // 单调 ns：用于差值/延时。墙钟 ns 用 getCurrentTimeNano()。
+    // 旧实现是 TSC 锚到 REALTIME；项目内无调用点，现统一为 CLOCK_MONOTONIC。
     inline int64_t getCurrentTimeNs() {
-        return TscClock::instance().now_ns();
+        return static_cast<int64_t>(hft::time::mono_ns());
+    }
+
+    // 单调 µs：给“单位已经是 µs、但需要算差值”的旧代码用。
+    // 墙钟 µs 仍然用 getCurrentTime()。
+    inline int64_t getMonotonicTime() {
+        return hft::time::mono_us();
     }
 
 
@@ -102,45 +111,44 @@ namespace crypto {
     static std::random_device rd;
     static std::atomic<long> atomic_rdtscp_count((rd() % (100-1))+1);
 
+    // 注意：这不是 RDTSCP，也不是时间戳，而是“REALTIME + 原子计数”的唯一 ID
+    // 生成器。新代码建议直接用 next_unique_id()。
     inline int64_t rdtscp(){
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME,&ts);
         return (ts.tv_sec + atomic_rdtscp_count++) * 1000000000LL + ts.tv_nsec;
     }
+
+    inline int64_t next_unique_id() {
+        return rdtscp();
+    }
    
+    // 原始 TSC tick，不是 ns；只用于同一线程内的短段或唯一 ID。
     inline  uint64_t rdtsc() {
-        return __builtin_ia32_rdtsc();
+        return hft::time::tsc_ticks();
     }
 
+    // 原始 TSC tick，不是 ns；用于唯一 ID/排序。
     inline int64_t get_rdtsc_timestamp() {
-        uint32_t lo, hi;
-
-        asm volatile("rdtsc": "=a"(lo), "=d"(hi));
-        return ((int64_t)hi << 32) | lo;
+        return static_cast<int64_t>(hft::time::tsc_ticks());
     }
 
+    // 墙钟 ns：会受 NTP 影响，不要用于差值。
     inline int64_t getCurrentTimeNano() { // ns
-        struct timespec ts;
-        clock_gettime(CLOCK_REALTIME,&ts);
-        return ts.tv_sec * 1000000000LL + ts.tv_nsec;
+        return static_cast<int64_t>(hft::time::wall_ns());
     }
 
+    // 墙钟 µs：兼容旧代码。
     inline int64_t getCurrentTime() { // us
-        struct timeval tv;
-        gettimeofday(&tv, NULL);    //该函数在sys/time.h头文件中
-        return tv.tv_sec * 1000000LL + tv.tv_usec ;
+        return hft::time::wall_us();
     }
 
-    inline int64_t getCurrentTimeMilli() { // ms 
-        struct timeval tv;
-        gettimeofday(&tv, NULL);    //该函数在sys/time.h头文件中
-        return (long)(tv.tv_sec * 1000 + tv.tv_usec * 0.001);
+    inline int64_t getCurrentTimeMilli() { // ms
+        return hft::time::wall_ms();
     }
 
     inline int64_t getCurrentTimeSeconds(){ // s
-        struct timeval tv;
-        gettimeofday(&tv, NULL);
-        return tv.tv_sec;
+        return hft::time::wall_s();
     }
 
     inline std::string getTimestampIso() {
@@ -166,7 +174,7 @@ namespace crypto {
         struct tm *tm_now;
         time(&now);
         tm_now = localtime(&now);
-        sprintf(dateStr, "%d%02d%02d",
+        std::snprintf(dateStr, sizeof(dateStr), "%d%02d%02d",
                 tm_now->tm_year + 1900,
                 tm_now->tm_mon + 1,
                 tm_now->tm_mday  );
