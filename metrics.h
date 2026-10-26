@@ -683,15 +683,25 @@ inline double percentile_ns(const std::uint64_t* buckets,
         q = 1.0;
     }
 
-    std::uint64_t target = static_cast<std::uint64_t>(q * static_cast<double>(total));
-    if (target >= total) {
-        target = total - 1;
+    // nearest-rank: rank = ceil(q * total)，1-based。
+    // 不能用 floor(q * total) + "acc > target"：这样在 q * total
+    // 正好是整数时会多取一个样本（例如 100 个样本的 P50 会取第 51 个）。
+    const double pos = q * static_cast<double>(total);
+    std::uint64_t rank = static_cast<std::uint64_t>(pos);
+    if (static_cast<double>(rank) < pos) {
+        ++rank;
+    }
+    if (rank == 0) {
+        rank = 1;                  // q == 0 时返回最小值所在桶
+    }
+    if (rank > total) {
+        rank = total;
     }
 
     std::uint64_t acc = 0;
     for (std::uint32_t i = 0; i < kBuckets; ++i) {
         acc += buckets[i];
-        if (acc > target) {
+        if (acc >= rank) {
             return bucket_mid(i) * ns_per_tick;
         }
     }
