@@ -847,4 +847,6 @@ struct AccountCfg {
 	std::string wsUrl{""};
     std::string wsTradeUrl{""};
     ApiMode apiMode{AM_REST};
+    // 该账号 REST worker 线程的绑核号 (-1 = 不绑)，直接透传给 net::RestClientConfig::cpu_core。
+    int cpuCore{-1};
 };
