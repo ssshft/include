@@ -28,6 +28,11 @@ struct ExchangeNode {
     std::vector<std::string> marketType;
     std::vector<std::string> instId;
     SbeAccount sbeAccount;
+    // consume 线程可用的核列表，例如 [0,1,2]：创建 unit 时按顺序每个**自旋** unit
+    // （DEPTH1/TRADES）取一个；空 = 不绑。
+    // 键名 cpucores，写在该交易所的对象里（顶层扁平 key 会让 get_exchange_md_info
+    // 对非对象值调 HasMember，直接踩断言）。
+    std::vector<int> cpuCores;
     
     ExchangeNode(const std::string& exchId = "", int lot = 30) : exchangeId(exchId), tokenLot(lot) {}
 };
@@ -100,6 +105,13 @@ public:
                 lot = std::stoi(exchange["tokenLot"].GetString());
             }
             ExchangeNode node(key, lot);
+            // 可选：consume 线程可用的核列表（空 = 不绑），元素同样是"数字当字符串"。
+            if (exchange.HasMember("cpucores")) {
+                const rapidjson::Value& cores = exchange["cpucores"];
+                for (rapidjson::SizeType i = 0; i < cores.Size(); i++) {
+                    node.cpuCores.push_back(std::stoi(cores[i].GetString()));
+                }
+            }
             for (rapidjson::SizeType i = 0; i < exchange["instType"].Size(); i++) {
                 node.instType.push_back(exchange["instType"][i].GetString());
             }
