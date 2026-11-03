@@ -145,6 +145,12 @@ namespace net {
         size_t      parallel_establish_threads = 4;
         // worker 线程绑核 (-1 = 不绑)
         int         cpu_core = -1;
+        // worker 空闲时的睡眠时长 (µs), 决定 "没有请求时这个线程烧不烧核"。
+        //   0  = HFT 模式: 64×pause + yield, 完全不睡。注意 yield() 在无其他可运行任务时
+        //        会立刻返回, 实测仍占满一核 (99.5%), 所以这一档是 "拿一颗核换最低延迟"。
+        //   >0 = 低功耗模式: 直接 sleep。代价是请求延迟最多增加该值 (在途请求 poll() 返回 0,
+        //        也走空闲分支, 所以响应回调同样被推迟), 对不关心延时的调用方才设。
+        int         idle_sleep_us = 0;
         // **整个请求** (write+read 总和) 的 RTT 预算 (0 = 不开)
         // 注意:不是 per-op, 而是端到端总预算。HFT 倾向严格上限。
         int         request_timeout_ms = 30'000;
@@ -576,10 +582,19 @@ namespace net {
                 }
 
 
-                // 4. 空闲 spin (HFT 模式: 不睡, pause + yield)
+                // 4. 空闲处理
+                //    idle_sleep_us == 0: HFT 模式, 不睡, pause + yield (占满一核, 最低延迟)
+                //    idle_sleep_us  > 0: 低功耗模式, 直接 sleep。注意 "有请求在途但还没回包" 时
+                //                        poll() 也返回 0、busy 也是 false, 会落到这里睡眠,
+                //                        所以响应回调同样被推迟 —— 只给告警/监控这类用。
                 if (!busy) {
-                    for (int i = 0; i < 64; ++i) BTS_REST_PAUSE();
-                    std::this_thread::yield();
+                    if (cfg_.idle_sleep_us > 0) {
+                        std::this_thread::sleep_for(std::chrono::microseconds(cfg_.idle_sleep_us));
+                    }
+                    else {
+                        for (int i = 0; i < 64; ++i) BTS_REST_PAUSE();
+                        std::this_thread::yield();
+                    }
                 }
             }
         }
