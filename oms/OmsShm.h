@@ -1486,8 +1486,7 @@ private:
     }
 
     static bool is_terminal(OrderStatus st) noexcept {
-        return st == OS_FILLED || st == OS_CANCELED || st == OS_REJECTED
-            || st == OS_FAILED;
+        return st == OS_FILLED || st == OS_CANCELED || st == OS_REJECTED;
     }
 
     // 插入三层索引. 主索引 (orderSysId) 失败 → 整体失败; 别名失败只 log, 因为
